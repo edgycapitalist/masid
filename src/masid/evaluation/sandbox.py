@@ -62,10 +62,16 @@ class ExecutionResult:
 def extract_code_blocks(text: str) -> CodeExtractionResult:
     """Extract Python code blocks from markdown-formatted agent output.
 
-    Looks for ```python ... ``` fences. Classifies blocks as test code
-    if they contain 'def test_', 'unittest', or 'pytest' imports.
+    Looks for ```python ... ``` fences (and plain ``` ... ``` fences).
+    Classifies blocks as test code if they contain test markers.
+
+    Strategy: Instead of concatenating all source blocks (which often
+    breaks due to duplicate imports/classes), we select the LARGEST
+    source block as the primary implementation. If multiple test blocks
+    exist, we concatenate them (tests are additive).
     """
-    pattern = r"```(?:python)?\s*\n(.*?)```"
+    # Match both ```python and plain ``` fences
+    pattern = r"```(?:python|py)?\s*\n?(.*?)```"
     blocks = re.findall(pattern, text, re.DOTALL)
 
     source_blocks = []
@@ -73,8 +79,13 @@ def extract_code_blocks(text: str) -> CodeExtractionResult:
 
     for block in blocks:
         block = block.strip()
-        if not block:
+        if not block or len(block) < 10:
             continue
+
+        # Skip blocks that are clearly not Python (shell commands, etc.)
+        if block.startswith("$") or block.startswith("pip ") or block.startswith("bash"):
+            continue
+
         # Classify as test code or source code
         is_test = any(marker in block for marker in [
             "def test_", "import unittest", "import pytest",
@@ -85,12 +96,48 @@ def extract_code_blocks(text: str) -> CodeExtractionResult:
         else:
             source_blocks.append(block)
 
+    # Select the largest source block as the primary implementation.
+    # Models often output code in multiple blocks (e.g., "here's the class"
+    # then "here's the usage example"). The largest block is typically
+    # the complete implementation.
+    if source_blocks:
+        best_source = max(source_blocks, key=len)
+    else:
+        best_source = ""
+
+    # For tests, concatenate all test blocks (they're additive).
+    # But deduplicate imports.
+    if test_blocks:
+        combined_tests = _merge_test_blocks(test_blocks)
+    else:
+        combined_tests = ""
+
     return CodeExtractionResult(
-        source_code="\n\n".join(source_blocks),
-        test_code="\n\n".join(test_blocks),
+        source_code=best_source,
+        test_code=combined_tests,
         num_code_blocks=len(source_blocks),
         num_test_blocks=len(test_blocks),
     )
+
+
+def _merge_test_blocks(blocks: list[str]) -> str:
+    """Merge multiple test code blocks, deduplicating imports."""
+    if len(blocks) == 1:
+        return blocks[0]
+
+    imports = set()
+    body_lines = []
+
+    for block in blocks:
+        for line in block.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(("import ", "from ")):
+                imports.add(stripped)
+            else:
+                body_lines.append(line)
+
+    merged = "\n".join(sorted(imports)) + "\n\n" + "\n".join(body_lines)
+    return merged.strip()
 
 
 def check_syntax(code: str) -> tuple[bool, str]:

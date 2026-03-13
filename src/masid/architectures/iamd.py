@@ -28,13 +28,13 @@ IAMD_EVAL_WEIGHTS: dict[str, dict[str, dict[str, float]]] = {
     "software_dev": {
         "Architect": {
             "design_clarity": 0.40,
-            "coder_adherence": 0.30,
+            "implementability_of_design": 0.30,
             "final_quality": 0.30,
         },
         "Coder": {
-            "code_correctness": 0.40,
-            "test_pass_rate": 0.30,
-            "reviewer_score": 0.30,
+            "code_correctness": 0.50,
+            "code_readability": 0.25,
+            "code_structure": 0.25,
         },
         "Tester": {
             "test_coverage": 0.40,
@@ -122,22 +122,24 @@ class IAMDArchitecture(BaseArchitecture):
 
     def build_system_prompt(self, role_spec: RoleSpec, task_description: str) -> str:
         criteria_text = _build_criteria_text(self.domain, role_spec.role)
-        downstream_text = ""
-        if role_spec.downstream:
-            downstream_text = (
-                f"\nYour output will be used by: {', '.join(role_spec.downstream)}. "
-                f"Part of your score depends on how useful your output is to them.\n"
-            )
+
+        # IAMD v3: The incentive alignment comes through the evaluation
+        # criteria alone — NOT by naming other roles or talking about
+        # "downstream" agents. Previous versions caused role confusion
+        # because the model would see "Tester" mentioned and start
+        # writing tests instead of code.
+        #
+        # The key insight: we want the Coder to produce code that is
+        # well-structured and easy to test, but we achieve this by
+        # asking for "code structure" and "readability" — not by
+        # mentioning testing or testers.
 
         return (
             f"You are a {role_spec.role}.\n\n"
             f"Role description: {role_spec.description}\n\n"
-            f"Your goal is to maximize YOUR evaluation score. "
-            f"Your score is determined by:\n{criteria_text}\n"
-            f"{downstream_text}\n"
-            f"Note: your score includes metrics from downstream roles. "
-            f"Producing output that is useful to others directly improves "
-            f"YOUR score.\n\n"
+            f"Your output will be scored on these criteria:\n{criteria_text}\n\n"
+            f"Produce the best possible output for your role. "
+            f"You will be scored automatically.\n\n"
             f"Task:\n{task_description}"
         )
 
@@ -184,8 +186,15 @@ class IAMDArchitecture(BaseArchitecture):
                 prompt = "Please produce your output."
             else:
                 # IAMD: structured information sharing — upstream outputs
-                # plus downstream evaluation criteria (so agent knows what
-                # downstream expects).
+                # only. Previous versions included downstream role hints
+                # (e.g., "Tester expects: ...") which caused severe role
+                # confusion — the Coder would read "Tester expects tests"
+                # and start writing tests instead of code.
+                #
+                # The IAMD incentive alignment now comes purely from:
+                # 1. Specific scoring criteria in the system prompt
+                # 2. Structured upstream context (not full transparency)
+                # 3. Execution feedback between rounds (from sandbox)
                 upstream_context = ""
                 for up_role in spec.upstream:
                     if up_role in prev_by_role:
@@ -193,31 +202,19 @@ class IAMDArchitecture(BaseArchitecture):
                             f"\n--- {up_role} output ---\n{prev_by_role[up_role]}\n"
                         )
 
-                downstream_hints = ""
-                for down_role in spec.downstream:
-                    down_spec = role_specs_by_name.get(down_role)
-                    if down_spec:
-                        downstream_hints += (
-                            f"\n[{down_role} expects: {down_spec.description}]"
-                        )
-
                 if round_number == 0 and not upstream_context:
-                    prompt = (
-                        f"Produce your output. Remember, your score depends on "
-                        f"downstream utility.{downstream_hints}"
-                    )
+                    prompt = "Produce your output based on the task description."
                 elif round_number == 0:
                     prompt = (
                         f"Here is upstream input:\n{upstream_context}\n"
-                        f"Produce your output. Your score includes downstream "
-                        f"impact.{downstream_hints}"
+                        f"Based on this input, produce your output."
                     )
                 else:
                     prompt = (
                         f"Revision round {round_number + 1}.\n"
-                        f"Upstream input:\n{upstream_context}\n"
-                        f"Downstream expectations:{downstream_hints}\n\n"
-                        f"Improve your output to maximize your evaluation score."
+                        f"Upstream input:\n{upstream_context}\n\n"
+                        f"Improve your output based on the scoring criteria "
+                        f"in your instructions."
                     )
 
             output = agent.act(prompt, round_number=round_number)

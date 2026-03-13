@@ -130,32 +130,35 @@ def batch(config_path: str) -> None:
     runner = TrialRunner(config=config, db=db)
 
     total = 0
+    errors = 0
     for arch in config.architectures:
         for domain in config.domains:
             tasks = get_tasks(domain)
-            for trial_num in range(config.experiment.trials_per_cell):
-                task = tasks[trial_num % len(tasks)]
-                seed = (
-                    config.experiment.seed + trial_num
-                    if config.experiment.seed is not None
-                    else random.randint(0, 2**31)
-                )
-                console.print(
-                    f"[dim]Trial {total + 1}: {arch} × {domain} × {task.task_id} "
-                    f"(seed={seed})[/dim]"
-                )
-                try:
-                    runner.run(
-                        architecture_key=arch,
-                        domain=domain,
-                        task=task,
-                        seed=seed,
+            for task in tasks:
+                for trial_num in range(config.experiment.trials_per_cell):
+                    seed = (
+                        config.experiment.seed + total
+                        if config.experiment.seed is not None
+                        else random.randint(0, 2**31)
                     )
-                except Exception as e:
-                    console.print(f"  [red]ERROR: {e}[/red]")
-                total += 1
+                    console.print(
+                        f"[dim]Trial {total + 1}: {arch} × {domain} × {task.task_id} "
+                        f"(trial {trial_num + 1}/{config.experiment.trials_per_cell}, "
+                        f"seed={seed})[/dim]"
+                    )
+                    try:
+                        runner.run(
+                            architecture_key=arch,
+                            domain=domain,
+                            task=task,
+                            seed=seed,
+                        )
+                    except Exception as e:
+                        console.print(f"  [red]ERROR: {e}[/red]")
+                        errors += 1
+                    total += 1
 
-    console.print(f"\n[bold green]Batch complete: {total} trials run.[/bold green]")
+    console.print(f"\n[bold green]Batch complete: {total} trials run ({errors} errors).[/bold green]")
     console.print(f"Results saved to: {config.storage.db_path}")
 
 

@@ -43,6 +43,20 @@ class TestExtractCodeBlocks:
         result = extract_code_blocks(text)
         assert result.num_code_blocks == 0
 
+    def test_largest_block_selected(self):
+        """When multiple source blocks exist, the largest is selected."""
+        text = (
+            "Helper:\n```python\nimport os\nprint('small')\n```\n"
+            "Full implementation:\n```python\n"
+            "import hashlib\n\nclass URLShortener:\n"
+            "    def __init__(self):\n        self.store = {}\n"
+            "    def shorten(self, url):\n        return hashlib.md5(url.encode()).hexdigest()[:8]\n"
+            "```\n"
+        )
+        result = extract_code_blocks(text)
+        assert "class URLShortener" in result.source_code
+        assert "print('small')" not in result.source_code
+
     def test_test_classification(self):
         text = "```python\nimport pytest\ndef test_something():\n    assert 1 == 1\n```"
         result = extract_code_blocks(text)

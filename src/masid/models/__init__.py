@@ -41,6 +41,20 @@ class LLMResponse:
     raw: Optional[dict] = field(default=None, repr=False)
 
 
+def _strip_think_blocks(text: str) -> str:
+    """Remove <think>...</think> reasoning blocks from model output.
+
+    Some models (Qwen3, DeepSeek-R1) wrap internal reasoning in think tags.
+    We strip these to get the actual response content.
+    """
+    import re
+    # Remove <think>...</think> blocks (greedy, handles newlines)
+    cleaned = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL)
+    # Also handle unclosed <think> tags (model ran out of tokens mid-thought)
+    cleaned = re.sub(r"<think>.*$", "", cleaned, flags=re.DOTALL)
+    return cleaned.strip()
+
+
 class LLMClient:
     """Unified client for local and API-based LLMs.
 
@@ -143,7 +157,7 @@ class LLMClient:
                 usage = response.usage
 
                 return LLMResponse(
-                    content=choice.message.content or "",
+                    content=_strip_think_blocks(choice.message.content or ""),
                     model=self.model_name,
                     prompt_tokens=usage.prompt_tokens if usage else 0,
                     completion_tokens=usage.completion_tokens if usage else 0,
