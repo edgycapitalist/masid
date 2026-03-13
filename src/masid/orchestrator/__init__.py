@@ -231,13 +231,16 @@ class TrialRunner:
 
         # 8. Persist to database
         if self.db:
+            # Build scores dict with blended quality for the DB
+            db_scores = dict(judge_scores)
+            db_scores["overall"] = quality  # use blended score, not raw judge
             self.db.save_trial(
                 trial_id=trial_id,
                 architecture=architecture_key,
                 domain=domain,
                 model=effective_model,
                 task_id=task.task_id,
-                scores=judge_scores,
+                scores=db_scores,
                 efficiency=efficiency,
                 coordination={
                     "duplication_rate": duplication,
@@ -249,6 +252,7 @@ class TrialRunner:
                 fault_type=fault_type,
                 fault_agent=fault_agent_role,
                 seed=seed,
+                metadata={**exec_meta} if exec_meta else None,
             )
             # Save individual agent outputs
             for round_outputs in all_round_outputs:
