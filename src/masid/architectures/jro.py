@@ -1,11 +1,20 @@
 """Joint Reward Optimization (JRO) architecture.
 
-All agents share a collective objective and explicitly optimize for
-project-wide success. Full transparency between agents — every agent
-sees all other agents' outputs and the overall project state.
+Theoretical basis: Cooperative game theory (Shapley, 1953; Pareto, 1896).
+All agents share a single utility function — the collective project
+quality. This aims for Pareto-optimal outcomes where no agent can be
+made better off without making another worse off.
 
-Game-theoretic model: Cooperative game / Pareto Optimality.
-MARL equivalent: Fully Cooperative (MAPPO, QMIX, VDN).
+Real-world analog: A tight-knit team with shared goals and bonuses.
+
+Key properties:
+- System prompt: "Make the TEAM succeed" (collective objective)
+- Information flow: FULL TRANSPARENCY. Every agent sees all outputs.
+- Between-round feedback: Implicit — agents see updated outputs from all.
+- Scoring: All agents receive the same collective score.
+- Cost: ~2x tokens because every agent processes everyone's output.
+
+MARL equivalent: Fully Cooperative (MAPPO, QMIX, VDN, Dec-POMDPs).
 """
 
 from __future__ import annotations
@@ -26,12 +35,13 @@ class JROArchitecture(BaseArchitecture):
         return (
             f"You are a {role_spec.role} working on a TEAM project.\n\n"
             f"Role description: {role_spec.description}\n\n"
-            f"Your PRIMARY goal is the success of the OVERALL project, not just "
-            f"your individual part. Consider how your output will affect every "
-            f"other team member and the final deliverable. Optimize for "
-            f"collective quality.\n\n"
-            f"You will see outputs from ALL team members. Use this information "
-            f"to ensure your work integrates well with theirs.\n\n"
+            f"Your PRIMARY goal is the success of the OVERALL project, "
+            f"not just your individual part. Consider how your output "
+            f"will affect every other team member and the final "
+            f"deliverable. Optimize for collective quality.\n\n"
+            f"You will see outputs from ALL team members. Use this "
+            f"information to ensure your work integrates well with "
+            f"theirs.\n\n"
             f"Task:\n{task_description}"
         )
 
@@ -63,7 +73,7 @@ class JROArchitecture(BaseArchitecture):
     ) -> list[AgentOutput]:
         outputs: list[AgentOutput] = []
 
-        # Build FULL context from all previous outputs (JRO = full transparency)
+        # JRO: Full transparency — every agent sees ALL outputs
         all_context = ""
         for o in previous_outputs:
             all_context += f"\n--- {o.role} output ---\n{o.content}\n"
@@ -71,7 +81,7 @@ class JROArchitecture(BaseArchitecture):
         for agent in agents:
             if round_number == 0 and not all_context:
                 prompt = (
-                    "Please produce your output. Remember: optimize for the "
+                    "Produce your output. Remember: optimize for the "
                     "success of the entire project, not just your part."
                 )
             elif round_number == 0:
@@ -82,16 +92,17 @@ class JROArchitecture(BaseArchitecture):
                     f"Ensure it integrates well with the rest of the project."
                 )
             else:
+                # JRO: feedback is implicit — you see everyone's latest work
                 prompt = (
                     f"This is revision round {round_number + 1}. "
-                    f"Here is the current state of ALL team outputs:\n{all_context}\n\n"
-                    f"Review the full project state and improve your output to "
-                    f"maximize overall project quality."
+                    f"Here is the current state of ALL team outputs:\n"
+                    f"{all_context}\n\n"
+                    f"Review the full project state and improve your output "
+                    f"to maximize overall project quality."
                 )
 
             output = agent.act(prompt, round_number=round_number)
             outputs.append(output)
-            # Update context for next agent in this round
             all_context += f"\n--- {agent.role} output ---\n{output.content}\n"
 
         return outputs
@@ -102,5 +113,5 @@ class JROArchitecture(BaseArchitecture):
         outputs: list[AgentOutput],
         collective_score: float,
     ) -> dict[str, float]:
-        # In JRO, ALL agents receive the same collective score.
+        # JRO: ALL agents share the same collective score.
         return {agent.agent_id: collective_score for agent in agents}

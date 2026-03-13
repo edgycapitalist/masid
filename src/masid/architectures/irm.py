@@ -1,10 +1,18 @@
 """Independent Reward Maximization (IRM) architecture.
 
-Each agent optimizes solely for its own sub-task quality. No shared
-objectives, no cross-agent feedback. Agents execute sequentially
-following the dependency graph, each receiving only upstream outputs.
+Theoretical basis: Non-cooperative game theory (Nash, 1950).
+Each agent maximizes its own utility without coordination.
+The resulting behavior is a Nash Equilibrium — no agent can
+improve its outcome by unilaterally changing its strategy.
 
-Game-theoretic model: Non-cooperative game / Nash Equilibrium behavior.
+Real-world analog: Independent contractors on a project.
+
+Key properties:
+- System prompt: "Do your job well" (individual objective)
+- Information flow: Upstream only (Architect → Coder → Tester → Reviewer)
+- Between-round feedback: NONE. Agents revise blind.
+- Scoring: Each agent scored independently on own output.
+
 MARL equivalent: Independent Learners (IPPO, IQL).
 """
 
@@ -14,6 +22,18 @@ from masid.agents import Agent, AgentOutput
 from masid.agents.roles import RoleSpec
 from masid.architectures import BaseArchitecture
 from masid.models import LLMClient
+
+
+def _build_upstream_context(
+    spec: RoleSpec,
+    prev_by_role: dict[str, str],
+) -> str:
+    """Gather outputs from upstream roles only."""
+    context = ""
+    for up_role in spec.upstream:
+        if up_role in prev_by_role:
+            context += f"\n--- {up_role} output ---\n{prev_by_role[up_role]}\n"
+    return context
 
 
 class IRMArchitecture(BaseArchitecture):
@@ -26,8 +46,9 @@ class IRMArchitecture(BaseArchitecture):
         return (
             f"You are a {role_spec.role}.\n\n"
             f"Role description: {role_spec.description}\n\n"
-            f"Your goal is to produce the highest quality output for YOUR specific "
-            f"role. Focus exclusively on maximizing the quality of your own work.\n\n"
+            f"Your goal is to produce the highest quality output for YOUR "
+            f"specific role. Focus exclusively on maximizing the quality "
+            f"of your own work.\n\n"
             f"Task:\n{task_description}"
         )
 
@@ -58,11 +79,10 @@ class IRMArchitecture(BaseArchitecture):
         previous_outputs: list[AgentOutput],
     ) -> list[AgentOutput]:
         outputs: list[AgentOutput] = []
-        # Build lookup of previous outputs by role
         prev_by_role: dict[str, str] = {
             o.role: o.content for o in previous_outputs
         }
-        # Build lookup of role_spec by role name
+
         from masid.agents.roles import DOMAIN_ROLES
 
         role_specs_by_name: dict[str, RoleSpec] = {}
@@ -73,34 +93,27 @@ class IRMArchitecture(BaseArchitecture):
         for agent in agents:
             spec = role_specs_by_name.get(agent.role)
             if spec is None:
-                # Fallback: just send task description
-                prompt = f"Please produce your output.\n\nTask: {task_description}"
+                prompt = "Please produce your output."
             else:
-                # Gather upstream outputs
-                upstream_context = ""
-                for up_role in spec.upstream:
-                    if up_role in prev_by_role:
-                        upstream_context += (
-                            f"\n--- {up_role} output ---\n{prev_by_role[up_role]}\n"
-                        )
+                upstream = _build_upstream_context(spec, prev_by_role)
 
-                if round_number == 0 and not upstream_context:
-                    prompt = "Please produce your output based on the task description."
+                if round_number == 0 and not upstream:
+                    prompt = "Produce your output based on the task description."
                 elif round_number == 0:
                     prompt = (
-                        f"Here is the input from upstream roles:\n{upstream_context}\n\n"
+                        f"Here is the input from upstream:\n{upstream}\n\n"
                         f"Based on this input, produce your output."
                     )
                 else:
+                    # IRM: NO feedback between rounds. Just "improve."
                     prompt = (
                         f"This is revision round {round_number + 1}. "
-                        f"Here is the latest input from upstream roles:\n{upstream_context}\n\n"
+                        f"Here is the latest upstream input:\n{upstream}\n\n"
                         f"Review and improve your previous output."
                     )
 
             output = agent.act(prompt, round_number=round_number)
             outputs.append(output)
-            # Make this output available for downstream agents in same round
             prev_by_role[agent.role] = output.content
 
         return outputs
@@ -111,7 +124,4 @@ class IRMArchitecture(BaseArchitecture):
         outputs: list[AgentOutput],
         collective_score: float,
     ) -> dict[str, float]:
-        # In IRM, each agent's score is based only on its own output quality.
-        # For now, return the collective score as a placeholder — the evaluation
-        # pipeline will compute per-agent scores separately.
         return {agent.agent_id: collective_score for agent in agents}

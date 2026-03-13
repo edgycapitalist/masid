@@ -129,16 +129,29 @@ class TrialRunner:
             all_round_outputs.append(round_outputs)
             previous_outputs = round_outputs
 
-            # For software_dev: run code after each round and feed results
-            # back to agents so they can fix issues in the next round.
-            if domain == "software_dev" and round_num < self.config.experiment.max_rounds - 1:
+            # IAMD-ONLY: Structured feedback mechanism between rounds.
+            # This is the core differentiator of IAMD — the "institution"
+            # that aligns self-interest with group welfare.
+            #
+            # IRM gets NO feedback between rounds (revise blind).
+            # JRO gets implicit feedback (see everyone's output).
+            # IAMD gets EXPLICIT scored feedback (the mechanism).
+            if (
+                architecture_key == "iamd"
+                and domain == "software_dev"
+                and round_num < self.config.experiment.max_rounds - 1
+            ):
                 exec_result = self._run_sandbox(round_outputs)
                 if exec_result is not None:
-                    feedback = self._format_execution_feedback(exec_result)
-                    # Inject execution feedback into all agents' context
+                    # Build per-agent scorecards — each agent gets feedback
+                    # relevant to THEIR role, not generic feedback.
                     for agent in agents:
+                        scorecard = self._build_scorecard(
+                            agent.role, exec_result, round_outputs
+                        )
                         agent.inject_context(
-                            f"[EXECUTION RESULTS FROM ROUND {round_num + 1}]\n{feedback}"
+                            f"[PERFORMANCE SCORECARD — ROUND {round_num + 1}]\n"
+                            f"{scorecard}"
                         )
 
         # 6. Evaluate
@@ -343,5 +356,89 @@ class TrialRunner:
                 lines.append("Some tests are failing. Please fix the code or tests.")
         elif result.code_runs:
             lines.append("No tests could be executed. Tester: please provide runnable pytest tests.")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _build_scorecard(
+        role: str,
+        exec_result: ExecutionResult,
+        outputs: list[AgentOutput],
+    ) -> str:
+        """Build a role-specific performance scorecard for IAMD feedback.
+
+        This is the core mechanism in IAMD — each agent receives feedback
+        tailored to their role, telling them specifically what to improve.
+        The feedback acts as the "price signal" in mechanism design:
+        agents optimize for themselves, but the scorecard guides them
+        toward collectively better outcomes.
+        """
+        if role == "Architect":
+            lines = ["ARCHITECT SCORECARD:"]
+            if exec_result.syntax_valid and exec_result.code_runs:
+                lines.append("  Design → Implementation: SUCCESS. Code runs.")
+                lines.append(f"  Test pass rate: {exec_result.tests_passed}/{exec_result.tests_total}")
+                if exec_result.tests_failed > 0:
+                    lines.append("  Action: Your design may need clearer interfaces or edge case handling.")
+                else:
+                    lines.append("  Action: Design is solid. Consider edge cases for robustness.")
+            elif exec_result.syntax_valid:
+                lines.append("  Design → Implementation: PARTIAL. Code has syntax but crashes at runtime.")
+                lines.append(f"  Error: {exec_result.code_error[:200]}")
+                lines.append("  Action: Simplify your design or clarify module interfaces.")
+            else:
+                lines.append("  Design → Implementation: FAILED. Code has syntax errors.")
+                lines.append("  Action: Your design may be too complex. Simplify.")
+
+        elif role == "Coder":
+            lines = ["CODER SCORECARD:"]
+            if not exec_result.syntax_valid:
+                lines.append(f"  Syntax: FAIL — {exec_result.syntax_error}")
+                lines.append("  Action: Fix syntax errors. Ensure complete, valid Python.")
+            elif not exec_result.code_runs:
+                lines.append("  Syntax: PASS")
+                lines.append(f"  Execution: FAIL — {exec_result.code_error[:200]}")
+                lines.append("  Action: Fix the runtime error. Check imports and class definitions.")
+            else:
+                lines.append("  Syntax: PASS")
+                lines.append("  Execution: PASS")
+                lines.append(f"  Tests: {exec_result.tests_passed}/{exec_result.tests_total} passed")
+                if exec_result.tests_total > 0 and exec_result.tests_failed > 0:
+                    lines.append("  Action: Fix failing tests. Check edge cases and error handling.")
+                elif exec_result.tests_total == 0:
+                    lines.append("  Action: Code works. Ensure it is well-structured.")
+                else:
+                    lines.append("  Action: All tests pass. Consider robustness improvements.")
+
+        elif role == "Tester":
+            lines = ["TESTER SCORECARD:"]
+            if exec_result.tests_run:
+                lines.append(f"  Tests executed: {exec_result.tests_total}")
+                lines.append(f"  Passed: {exec_result.tests_passed}, Failed: {exec_result.tests_failed}")
+                if exec_result.tests_total < 3:
+                    lines.append("  Action: Write more tests. Aim for at least 5 test functions.")
+                elif exec_result.tests_passed == exec_result.tests_total:
+                    lines.append("  Action: All pass. Add edge case tests to improve coverage.")
+                else:
+                    lines.append("  Action: Some tests fail. Verify tests match the code interface.")
+            elif exec_result.code_runs:
+                lines.append("  Tests: NONE EXECUTED")
+                lines.append("  Action: Ensure you import from 'solution' and use 'def test_' naming.")
+            else:
+                lines.append("  Tests: COULD NOT RUN (code has errors)")
+                lines.append("  Action: Write tests that will be ready when the code is fixed.")
+
+        elif role == "Reviewer":
+            lines = ["REVIEWER SCORECARD:"]
+            lines.append(f"  Code runs: {exec_result.code_runs}")
+            lines.append(f"  Tests: {exec_result.tests_passed}/{exec_result.tests_total} passed")
+            lines.append(f"  Execution score: {exec_result.execution_score:.0%}")
+            if exec_result.execution_score < 0.5:
+                lines.append("  Action: Focus review on fundamental correctness issues.")
+            else:
+                lines.append("  Action: Focus review on quality, edge cases, maintainability.")
+
+        else:
+            lines = [f"{role} SCORECARD:", "  No specific metrics for this role."]
 
         return "\n".join(lines)

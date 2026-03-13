@@ -86,19 +86,22 @@ class TestIAMD:
         roles = get_roles("software_dev")
         agents = arch.build_agents(roles, TASK_DESC, mock_client)
         assert len(agents) == 4
-        # IAMD prompts should include evaluation criteria
+        # IAMD v4: prompt mentions scorecard/feedback mechanism
         coder = [a for a in agents if a.role == "Coder"][0]
-        assert "evaluation score" in coder.system_prompt.lower() or "evaluation" in coder.system_prompt.lower()
+        assert "scorecard" in coder.system_prompt.lower() or "feedback" in coder.system_prompt.lower()
 
-    def test_eval_weights_exist(self):
-        from masid.architectures.iamd import IAMD_EVAL_WEIGHTS
-        for domain in ["software_dev", "research_synthesis", "project_planning"]:
-            assert domain in IAMD_EVAL_WEIGHTS
-            roles = get_roles(domain)
-            for role_spec in roles:
-                assert role_spec.role in IAMD_EVAL_WEIGHTS[domain], (
-                    f"Missing weights for {domain}/{role_spec.role}"
-                )
+    def test_iamd_prompt_no_role_leakage(self, mock_client):
+        """IAMD prompts must NOT reference other agent roles to avoid role confusion."""
+        arch = IAMDArchitecture(domain="software_dev")
+        roles = get_roles("software_dev")
+        agents = arch.build_agents(roles, TASK_DESC, mock_client)
+        coder = [a for a in agents if a.role == "Coder"][0]
+        prompt_lower = coder.system_prompt.lower()
+        # Check for explicit role references (not substrings like "architecture")
+        assert "the tester" not in prompt_lower
+        assert "the reviewer" not in prompt_lower
+        assert "downstream" not in prompt_lower
+        assert "other roles" not in prompt_lower
 
     def test_run_round_zero(self, mock_client):
         arch = IAMDArchitecture(domain="software_dev")
