@@ -30,7 +30,9 @@ SOFTWARE_DEV_ROLES: list[RoleSpec] = [
         role="Architect",
         description=(
             "Designs the high-level structure: module decomposition, "
-            "interfaces, data flow, and technology choices."
+            "interfaces, data flow, and technology choices. "
+            "Output a clear design document describing classes, methods, "
+            "and their interactions."
         ),
         upstream=[],
         downstream=["Coder"],
@@ -39,7 +41,10 @@ SOFTWARE_DEV_ROLES: list[RoleSpec] = [
         role="Coder",
         description=(
             "Implements the solution in Python based on the architecture "
-            "specification. Produces working code."
+            "specification. You MUST output all implementation code inside "
+            "```python``` markdown fences. The code must be complete, "
+            "runnable, and self-contained in a single module. Do not use "
+            "external packages beyond the Python standard library."
         ),
         upstream=["Architect"],
         downstream=["Tester"],
@@ -47,8 +52,11 @@ SOFTWARE_DEV_ROLES: list[RoleSpec] = [
     RoleSpec(
         role="Tester",
         description=(
-            "Writes and runs unit tests for the code. Reports test results, "
-            "coverage, and any bugs found."
+            "Writes pytest-style unit tests for the code. You MUST output "
+            "all test code inside ```python``` markdown fences. Each test "
+            "function must start with 'test_'. Import the code under test "
+            "from 'solution' (e.g., 'from solution import MyClass'). "
+            "Tests must be runnable with pytest."
         ),
         upstream=["Coder"],
         downstream=["Reviewer"],

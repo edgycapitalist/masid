@@ -22,6 +22,7 @@ from masid.domains import TaskSpec
 from masid.domains.registry import get_tasks
 from masid.evaluation import TrialMetrics, compute_duplication_rate, compute_efficiency_metrics
 from masid.evaluation.judge import judge_trial_output
+from masid.evaluation.sandbox import evaluate_agent_code, ExecutionResult
 from masid.models import LLMClient
 from masid.storage import ExperimentDB
 
@@ -115,6 +116,7 @@ class TrialRunner:
         # 5. Run rounds
         all_round_outputs: list[list[AgentOutput]] = []
         previous_outputs: list[AgentOutput] = []
+        execution_result: Optional[ExecutionResult] = None
 
         for round_num in range(self.config.experiment.max_rounds):
             logger.info("  Round %d/%d", round_num + 1, self.config.experiment.max_rounds)
@@ -127,11 +129,37 @@ class TrialRunner:
             all_round_outputs.append(round_outputs)
             previous_outputs = round_outputs
 
+            # For software_dev: run code after each round and feed results
+            # back to agents so they can fix issues in the next round.
+            if domain == "software_dev" and round_num < self.config.experiment.max_rounds - 1:
+                exec_result = self._run_sandbox(round_outputs)
+                if exec_result is not None:
+                    feedback = self._format_execution_feedback(exec_result)
+                    # Inject execution feedback into all agents' context
+                    for agent in agents:
+                        agent.inject_context(
+                            f"[EXECUTION RESULTS FROM ROUND {round_num + 1}]\n{feedback}"
+                        )
+
         # 6. Evaluate
         final_outputs = all_round_outputs[-1]
         combined_output = "\n\n".join(
             f"=== {o.role} ===\n{o.content}" for o in final_outputs
         )
+
+        # Run sandbox on final outputs for software_dev
+        if domain == "software_dev":
+            execution_result = self._run_sandbox(final_outputs)
+            if execution_result:
+                logger.info(
+                    "  Execution score: %.2f (syntax=%s, runs=%s, "
+                    "tests=%d/%d passed)",
+                    execution_result.execution_score,
+                    execution_result.syntax_valid,
+                    execution_result.code_runs,
+                    execution_result.tests_passed,
+                    execution_result.tests_total,
+                )
 
         # LLM-as-judge
         judge_client = LLMClient(
@@ -161,12 +189,30 @@ class TrialRunner:
         )
 
         # 7. Build metrics object
+        exec_meta = {}
+        if execution_result:
+            exec_meta = {
+                "syntax_valid": execution_result.syntax_valid,
+                "code_runs": execution_result.code_runs,
+                "tests_passed": execution_result.tests_passed,
+                "tests_failed": execution_result.tests_failed,
+                "tests_total": execution_result.tests_total,
+                "execution_score": execution_result.execution_score,
+            }
+
+        # For software_dev, blend execution score with judge score.
+        # Execution score is weighted 60%, judge 40% (objective > subjective).
+        quality = judge_scores.get("overall", 0.5)
+        if execution_result:
+            quality = 0.6 * execution_result.execution_score + 0.4 * quality
+            quality = round(quality, 4)
+
         metrics = TrialMetrics(
             trial_id=trial_id,
             architecture=architecture_key,
             domain=domain,
             model=effective_model,
-            quality_score=judge_scores.get("overall", 0.5),
+            quality_score=quality,
             total_tokens=efficiency["total_tokens"],
             total_latency_seconds=efficiency["total_latency"],
             num_rounds=efficiency["num_rounds"],
@@ -179,6 +225,7 @@ class TrialRunner:
                 "judge_scores": judge_scores,
                 "fault_type": fault_type,
                 "fault_agent": fault_agent_role,
+                **exec_meta,
             },
         )
 
@@ -246,3 +293,51 @@ class TrialRunner:
                     logger.info("  Injected fault: %s on %s", fault_type, target_role)
                     return
         logger.warning("  Could not find agent with role %s for fault injection", target_role)
+
+    @staticmethod
+    def _run_sandbox(outputs: list[AgentOutput]) -> Optional[ExecutionResult]:
+        """Run the code sandbox on a round's outputs.
+
+        Finds the Coder and Tester outputs and evaluates the code.
+        Returns None if no Coder output is found.
+        """
+        coder_output = ""
+        tester_output = ""
+        for o in outputs:
+            if o.role == "Coder":
+                coder_output = o.content
+            elif o.role == "Tester":
+                tester_output = o.content
+
+        if not coder_output:
+            return None
+
+        return evaluate_agent_code(coder_output, tester_output)
+
+    @staticmethod
+    def _format_execution_feedback(result: ExecutionResult) -> str:
+        """Format execution results as feedback text for agents."""
+        lines = []
+        if not result.syntax_valid:
+            lines.append(f"SYNTAX ERROR: {result.syntax_error}")
+            lines.append("The code has syntax errors and cannot run. Please fix.")
+            return "\n".join(lines)
+
+        if result.code_runs:
+            lines.append("Code executed successfully (no import or runtime errors).")
+        else:
+            lines.append(f"CODE RUNTIME ERROR: {result.code_error}")
+            lines.append("The code crashes when executed. Please fix.")
+
+        if result.tests_run:
+            lines.append(
+                f"Test results: {result.tests_passed} passed, "
+                f"{result.tests_failed} failed, {result.tests_errors} errors "
+                f"out of {result.tests_total} total."
+            )
+            if result.tests_failed > 0 or result.tests_errors > 0:
+                lines.append("Some tests are failing. Please fix the code or tests.")
+        elif result.code_runs:
+            lines.append("No tests could be executed. Tester: please provide runnable pytest tests.")
+
+        return "\n".join(lines)
