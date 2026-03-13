@@ -236,6 +236,22 @@ def inspect(trial_id: str, config_path: str | None) -> None:
     console.print("[bold]Judge Rationale:[/bold]")
     console.print(f"  {t['judge_rationale'] or '(empty)'}")
 
+    # Show execution results if present (software_dev domain)
+    if t.get("metadata_json"):
+        import json
+
+        meta = json.loads(t["metadata_json"]) if isinstance(t["metadata_json"], str) else {}
+        if "execution_score" in meta:
+            console.print()
+            console.print("[bold]Code Execution (objective):[/bold]")
+            console.print(f"  Execution score: {meta['execution_score']:.2f}")
+            console.print(f"  Syntax valid:    {meta.get('syntax_valid', 'N/A')}")
+            console.print(f"  Code runs:       {meta.get('code_runs', 'N/A')}")
+            console.print(
+                f"  Tests:           {meta.get('tests_passed', 0)} passed / "
+                f"{meta.get('tests_total', 0)} total"
+            )
+
 
 if __name__ == "__main__":
     main()
