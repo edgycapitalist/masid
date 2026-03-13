@@ -32,6 +32,11 @@ def _setup_logging(level: str = "INFO") -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
+    # Suppress noisy third-party loggers
+    logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+    logging.getLogger("litellm").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 @click.group()
@@ -192,6 +197,44 @@ def results(fmt: str, config_path: str | None) -> None:
                 f"{t['total_latency_seconds']:.1f}s",
             )
         console.print(table)
+
+
+@main.command()
+@click.argument("trial_id")
+@click.option("--config", "config_path", default=None, help="Path to config YAML")
+def inspect(trial_id: str, config_path: str | None) -> None:
+    """Inspect a trial's details including judge rationale and agent outputs."""
+    config = load_config(config_path)
+    db = ExperimentDB(config.storage.db_path)
+
+    # Find trial (support partial ID match)
+    trials = db.get_all_trials()
+    match = [t for t in trials if t["trial_id"].startswith(trial_id)]
+    if not match:
+        console.print(f"[red]No trial found matching '{trial_id}'[/red]")
+        return
+
+    t = match[0]
+    console.print(f"\n[bold]Trial {t['trial_id']}[/bold]")
+    console.print(f"  Architecture: {t['architecture']}")
+    console.print(f"  Domain:       {t['domain']}")
+    console.print(f"  Model:        {t['model']}")
+    console.print(f"  Task:         {t['task_id']}")
+    console.print()
+    console.print("[bold]Scores:[/bold]")
+    console.print(f"  Overall:     {t['quality_score']:.2f}")
+    console.print(f"  Correctness: {t['correctness']:.2f}")
+    console.print(f"  Completeness:{t['completeness']:.2f}")
+    console.print(f"  Coherence:   {t['coherence']:.2f}")
+    console.print(f"  Integration: {t['integration']:.2f}")
+    console.print()
+    console.print("[bold]Efficiency:[/bold]")
+    console.print(f"  Tokens:  {t['total_tokens']}")
+    console.print(f"  Latency: {t['total_latency_seconds']:.1f}s")
+    console.print(f"  Rounds:  {t['num_rounds']}")
+    console.print()
+    console.print("[bold]Judge Rationale:[/bold]")
+    console.print(f"  {t['judge_rationale'] or '(empty)'}")
 
 
 if __name__ == "__main__":

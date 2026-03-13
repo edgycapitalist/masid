@@ -73,6 +73,27 @@ class TestJudgeParser:
         result = _parse_judge_response(text)
         assert result["correctness"] == 0.6
 
+    def test_prefill_continuation(self):
+        """When assistant prefill '{' is used, response starts without brace."""
+        text = '"correctness": 8, "completeness": 7, "coherence": 9, "integration": 7, "overall": 8, "rationale": "Good work."}'
+        result = _parse_judge_response(text)
+        assert result["correctness"] == 0.8
+        assert result["overall"] == 0.8
+
+    def test_regex_fallback(self):
+        """When JSON is malformed, fall back to regex extraction."""
+        text = "I'd rate correctness: 7, completeness: 8, coherence: 6, integration: 5, overall: 7. The work was decent."
+        result = _parse_judge_response(text)
+        assert result["correctness"] == 0.7
+        assert result["overall"] == 0.7
+
+    def test_score_clamping(self):
+        text = '{"correctness": 15, "completeness": 0, "coherence": 8, "integration": 7, "overall": 11, "rationale": "test"}'
+        result = _parse_judge_response(text)
+        assert result["correctness"] == 1.0  # clamped to 10 → 1.0
+        assert result["completeness"] == 0.1  # clamped to 1 → 0.1
+        assert result["overall"] == 1.0  # clamped to 10 → 1.0
+
     def test_malformed_json_fallback(self):
         text = "I think the output is pretty good overall."
         result = _parse_judge_response(text)
