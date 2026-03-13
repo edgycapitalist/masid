@@ -7,14 +7,25 @@ goes through this module, making it trivial to swap backends.
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 import litellm
 
 # Suppress LiteLLM's verbose logging by default
 litellm.suppress_debug_info = True
+
+# Load .env file if present (for API keys)
+_env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
+if _env_path.exists():
+    for line in _env_path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
 
 
 @dataclass(frozen=True)
@@ -70,6 +81,8 @@ class LLMClient:
         # Build the model string LiteLLM expects
         if provider == "ollama":
             self._litellm_model = f"ollama/{model_name}"
+        elif provider == "groq":
+            self._litellm_model = f"groq/{model_name}"
         else:
             self._litellm_model = model_name
 
@@ -85,6 +98,8 @@ class LLMClient:
     ) -> LLMResponse:
         """Send a chat-completion request and return a structured response.
 
+        Automatically retries on rate-limit errors with exponential backoff.
+
         Parameters
         ----------
         messages : list of dict
@@ -99,7 +114,10 @@ class LLMClient:
         -------
         LLMResponse
         """
-        t0 = time.perf_counter()
+        import logging
+        import re
+
+        logger = logging.getLogger(__name__)
 
         kwargs: dict = {
             "model": self._litellm_model,
@@ -112,22 +130,48 @@ class LLMClient:
         if self.base_url and self.provider == "ollama":
             kwargs["api_base"] = self.base_url
 
-        response = litellm.completion(**kwargs)
+        max_retries = 5
+        base_wait = 10  # seconds
 
-        latency = time.perf_counter() - t0
+        for attempt in range(max_retries + 1):
+            t0 = time.perf_counter()
+            try:
+                response = litellm.completion(**kwargs)
 
-        choice = response.choices[0]
-        usage = response.usage
+                latency = time.perf_counter() - t0
+                choice = response.choices[0]
+                usage = response.usage
 
-        return LLMResponse(
-            content=choice.message.content or "",
-            model=self.model_name,
-            prompt_tokens=usage.prompt_tokens if usage else 0,
-            completion_tokens=usage.completion_tokens if usage else 0,
-            total_tokens=usage.total_tokens if usage else 0,
-            latency_seconds=round(latency, 3),
-            raw=response.model_dump() if hasattr(response, "model_dump") else None,
-        )
+                return LLMResponse(
+                    content=choice.message.content or "",
+                    model=self.model_name,
+                    prompt_tokens=usage.prompt_tokens if usage else 0,
+                    completion_tokens=usage.completion_tokens if usage else 0,
+                    total_tokens=usage.total_tokens if usage else 0,
+                    latency_seconds=round(latency, 3),
+                    raw=response.model_dump() if hasattr(response, "model_dump") else None,
+                )
+
+            except Exception as e:
+                error_str = str(e)
+                is_rate_limit = "rate_limit" in error_str.lower() or "429" in error_str
+
+                if is_rate_limit and attempt < max_retries:
+                    # Try to extract wait time from error message
+                    wait_match = re.search(r"try again in (\d+\.?\d*)", error_str, re.IGNORECASE)
+                    if wait_match:
+                        wait_time = float(wait_match.group(1)) + 2  # add buffer
+                    else:
+                        wait_time = base_wait * (2 ** attempt)
+
+                    logger.warning(
+                        "Rate limited (attempt %d/%d). Waiting %.0fs...",
+                        attempt + 1, max_retries, wait_time,
+                    )
+                    time.sleep(wait_time)
+                    continue
+
+                raise
 
     def __repr__(self) -> str:
         return (
