@@ -41,6 +41,7 @@ class EvaluationConfig(BaseModel):
 
     judge_model: str = "llama3.1:8b"
     judge_provider: str = "ollama"
+    judge_base_url: Optional[str] = None
     spot_check_pct: float = 0.10
 
 

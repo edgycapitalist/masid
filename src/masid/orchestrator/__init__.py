@@ -157,7 +157,7 @@ class TrialRunner:
                     judge_client = LLMClient(
                         provider=self.config.evaluation.judge_provider,
                         model_name=self.config.evaluation.judge_model,
-                        base_url=self.config.model.base_url,
+                        base_url=self.config.evaluation.judge_base_url,
                         temperature=0.1,
                         max_tokens=512,
                         timeout=self.config.model.timeout,
@@ -199,7 +199,7 @@ class TrialRunner:
         judge_client = LLMClient(
             provider=self.config.evaluation.judge_provider,
             model_name=self.config.evaluation.judge_model,
-            base_url=self.config.model.base_url,
+            base_url=self.config.evaluation.judge_base_url,
             temperature=0.1,
             max_tokens=512,
             timeout=self.config.model.timeout,
