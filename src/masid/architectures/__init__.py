@@ -14,6 +14,7 @@ from typing import Any
 
 from masid.agents import Agent, AgentOutput
 from masid.agents.roles import RoleSpec
+from masid.domains import TaskSpec
 from masid.models import LLMClient
 
 
@@ -37,10 +38,14 @@ class BaseArchitecture(ABC):
     def build_agents(
         self,
         role_specs: list[RoleSpec],
-        task_description: str,
+        task: TaskSpec,
         client: LLMClient,
     ) -> list[Agent]:
-        """Instantiate the full set of agents for a trial."""
+        """Instantiate the full set of agents for a trial.
+
+        Uses ``task.get_description_for_role(role)`` to give each agent
+        only the information appropriate for their role.
+        """
 
     @abstractmethod
     def run_round(

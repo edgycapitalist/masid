@@ -25,6 +25,12 @@ class TaskSpec:
         One of ``"easy"``, ``"medium"``, ``"hard"``.
     expected_output_hint : str
         Brief description of what a good output looks like (used by evaluators).
+    role_sources : dict or None
+        Optional mapping from role name to role-specific source material.
+        When present, each agent receives ONLY the sources assigned to
+        their role instead of the full description. Agents not listed
+        receive the full description. Used for information separation
+        in the research synthesis domain.
     """
 
     task_id: str
@@ -32,3 +38,15 @@ class TaskSpec:
     description: str
     difficulty: str
     expected_output_hint: str
+    role_sources: dict[str, str] | None = None
+
+    def get_description_for_role(self, role: str) -> str:
+        """Return the task description appropriate for a specific role.
+
+        If role_sources is set and the role is listed, returns the base
+        description with role-specific sources appended. Otherwise
+        returns the full description.
+        """
+        if self.role_sources and role in self.role_sources:
+            return self.role_sources[role]
+        return self.description

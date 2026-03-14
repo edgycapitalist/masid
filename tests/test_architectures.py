@@ -7,9 +7,17 @@ from masid.architectures.registry import get_architecture
 from masid.architectures.irm import IRMArchitecture
 from masid.architectures.jro import JROArchitecture
 from masid.architectures.iamd import IAMDArchitecture
+from masid.domains import TaskSpec
 
 
 TASK_DESC = "Build a URL shortener library."
+TASK = TaskSpec(
+    task_id="test_001",
+    title="Test Task",
+    description=TASK_DESC,
+    difficulty="medium",
+    expected_output_hint="A URL shortener.",
+)
 
 
 class TestArchitectureRegistry:
@@ -37,7 +45,7 @@ class TestIRM:
     def test_build_agents(self, mock_client):
         arch = IRMArchitecture()
         roles = get_roles("software_dev")
-        agents = arch.build_agents(roles, TASK_DESC, mock_client)
+        agents = arch.build_agents(roles, TASK, mock_client)
         assert len(agents) == 4
         # IRM prompts should emphasize individual quality
         for agent in agents:
@@ -46,7 +54,7 @@ class TestIRM:
     def test_run_round_zero(self, mock_client):
         arch = IRMArchitecture()
         roles = get_roles("software_dev")
-        agents = arch.build_agents(roles, TASK_DESC, mock_client)
+        agents = arch.build_agents(roles, TASK, mock_client)
         outputs = arch.run_round(agents, TASK_DESC, round_number=0, previous_outputs=[])
         assert len(outputs) == 4
         # Each output should have content from the mock
@@ -56,7 +64,7 @@ class TestIRM:
     def test_run_round_with_previous(self, mock_client):
         arch = IRMArchitecture()
         roles = get_roles("software_dev")
-        agents = arch.build_agents(roles, TASK_DESC, mock_client)
+        agents = arch.build_agents(roles, TASK, mock_client)
         r0 = arch.run_round(agents, TASK_DESC, 0, [])
         r1 = arch.run_round(agents, TASK_DESC, 1, r0)
         assert len(r1) == 4
@@ -66,7 +74,7 @@ class TestJRO:
     def test_build_agents(self, mock_client):
         arch = JROArchitecture()
         roles = get_roles("software_dev")
-        agents = arch.build_agents(roles, TASK_DESC, mock_client)
+        agents = arch.build_agents(roles, TASK, mock_client)
         assert len(agents) == 4
         for agent in agents:
             assert "TEAM project" in agent.system_prompt
@@ -75,7 +83,7 @@ class TestJRO:
     def test_run_round_zero(self, mock_client):
         arch = JROArchitecture()
         roles = get_roles("software_dev")
-        agents = arch.build_agents(roles, TASK_DESC, mock_client)
+        agents = arch.build_agents(roles, TASK, mock_client)
         outputs = arch.run_round(agents, TASK_DESC, 0, [])
         assert len(outputs) == 4
 
@@ -84,7 +92,7 @@ class TestIAMD:
     def test_build_agents(self, mock_client):
         arch = IAMDArchitecture(domain="software_dev")
         roles = get_roles("software_dev")
-        agents = arch.build_agents(roles, TASK_DESC, mock_client)
+        agents = arch.build_agents(roles, TASK, mock_client)
         assert len(agents) == 4
         # IAMD v4: prompt mentions scorecard/feedback mechanism
         coder = [a for a in agents if a.role == "Coder"][0]
@@ -94,7 +102,7 @@ class TestIAMD:
         """IAMD prompts must NOT reference other agent roles to avoid role confusion."""
         arch = IAMDArchitecture(domain="software_dev")
         roles = get_roles("software_dev")
-        agents = arch.build_agents(roles, TASK_DESC, mock_client)
+        agents = arch.build_agents(roles, TASK, mock_client)
         coder = [a for a in agents if a.role == "Coder"][0]
         prompt_lower = coder.system_prompt.lower()
         # Check for explicit role references (not substrings like "architecture")
@@ -106,6 +114,6 @@ class TestIAMD:
     def test_run_round_zero(self, mock_client):
         arch = IAMDArchitecture(domain="software_dev")
         roles = get_roles("software_dev")
-        agents = arch.build_agents(roles, TASK_DESC, mock_client)
+        agents = arch.build_agents(roles, TASK, mock_client)
         outputs = arch.run_round(agents, TASK_DESC, 0, [])
         assert len(outputs) == 4

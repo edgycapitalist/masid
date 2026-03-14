@@ -39,6 +39,7 @@ from __future__ import annotations
 from masid.agents import Agent, AgentOutput
 from masid.agents.roles import RoleSpec
 from masid.architectures import BaseArchitecture
+from masid.domains import TaskSpec
 from masid.models import LLMClient
 
 
@@ -72,12 +73,13 @@ class IAMDArchitecture(BaseArchitecture):
     def build_agents(
         self,
         role_specs: list[RoleSpec],
-        task_description: str,
+        task: TaskSpec,
         client: LLMClient,
     ) -> list[Agent]:
         agents = []
         for i, spec in enumerate(role_specs):
-            prompt = self.build_system_prompt(spec, task_description)
+            description = task.get_description_for_role(spec.role)
+            prompt = self.build_system_prompt(spec, description)
             agent = Agent(
                 agent_id=f"{spec.role.lower()}_{i}",
                 role=spec.role,

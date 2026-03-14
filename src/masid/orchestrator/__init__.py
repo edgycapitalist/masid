@@ -107,7 +107,7 @@ class TrialRunner:
 
         # 3. Build agents
         role_specs = get_roles(domain)
-        agents = architecture.build_agents(role_specs, task.description, client)
+        agents = architecture.build_agents(role_specs, task, client)
 
         # 4. Optionally inject fault
         if fault_type and fault_agent_role:
