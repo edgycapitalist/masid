@@ -138,21 +138,42 @@ class TrialRunner:
             # IAMD gets EXPLICIT scored feedback (the mechanism).
             if (
                 architecture_key == "iamd"
-                and domain == "software_dev"
                 and round_num < self.config.experiment.max_rounds - 1
             ):
-                exec_result = self._run_sandbox(round_outputs)
-                if exec_result is not None:
-                    # Build per-agent scorecards — each agent gets feedback
-                    # relevant to THEIR role, not generic feedback.
-                    for agent in agents:
-                        scorecard = self._build_scorecard(
-                            agent.role, exec_result, round_outputs
+                if domain == "software_dev":
+                    # Software dev: use code sandbox for objective feedback
+                    exec_result = self._run_sandbox(round_outputs)
+                    if exec_result is not None:
+                        for agent in agents:
+                            scorecard = self._build_scorecard(
+                                agent.role, exec_result, round_outputs
+                            )
+                            agent.inject_context(
+                                f"[PERFORMANCE SCORECARD — ROUND {round_num + 1}]\n"
+                                f"{scorecard}"
+                            )
+                else:
+                    # Other domains: use LLM-judge for per-agent feedback
+                    judge_client = LLMClient(
+                        provider=self.config.evaluation.judge_provider,
+                        model_name=self.config.evaluation.judge_model,
+                        base_url=self.config.model.base_url,
+                        temperature=0.1,
+                        max_tokens=512,
+                        timeout=self.config.model.timeout,
+                    )
+                    for agent_out in round_outputs:
+                        scorecard = self._build_llm_scorecard(
+                            judge_client, agent_out, task.description, round_outputs
                         )
-                        agent.inject_context(
-                            f"[PERFORMANCE SCORECARD — ROUND {round_num + 1}]\n"
-                            f"{scorecard}"
-                        )
+                        # Find the agent and inject feedback
+                        for agent in agents:
+                            if agent.agent_id == agent_out.agent_id:
+                                agent.inject_context(
+                                    f"[PERFORMANCE SCORECARD — ROUND {round_num + 1}]\n"
+                                    f"{scorecard}"
+                                )
+                                break
 
         # 6. Evaluate
         final_outputs = all_round_outputs[-1]
@@ -188,6 +209,7 @@ class TrialRunner:
             task_description=task.description,
             combined_output=combined_output,
             expected_hint=task.expected_output_hint,
+            domain=domain,
         )
 
         # Efficiency metrics
@@ -442,3 +464,56 @@ class TrialRunner:
             lines = [f"{role} SCORECARD:", "  No specific metrics for this role."]
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _build_llm_scorecard(
+        judge_client: LLMClient,
+        agent_output: AgentOutput,
+        task_description: str,
+        all_outputs: list[AgentOutput],
+    ) -> str:
+        """Build a per-agent scorecard using LLM-as-judge.
+
+        Used for non-software-dev domains where there's no code sandbox.
+        The judge evaluates the agent's output in the context of the
+        full team output and provides specific, actionable feedback.
+        """
+        others_context = ""
+        for o in all_outputs:
+            if o.agent_id != agent_output.agent_id:
+                snippet = o.content[:500]
+                others_context += f"  {o.role}: {snippet}...\n"
+
+        prompt = (
+            f"You are evaluating a {agent_output.role}'s output in a "
+            f"multi-agent collaboration.\n\n"
+            f"Task: {task_description[:500]}\n\n"
+            f"This agent's output:\n{agent_output.content[:1000]}\n\n"
+            f"Other agents' outputs (summaries):\n{others_context}\n\n"
+            f"Provide a brief scorecard for the {agent_output.role}. "
+            f"Score 1-10 on: quality, completeness, usefulness to other agents. "
+            f"Then give ONE specific, actionable improvement suggestion.\n\n"
+            f"Format:\n"
+            f"SCORECARD:\n"
+            f"  Quality: X/10\n"
+            f"  Completeness: X/10\n"
+            f"  Usefulness to team: X/10\n"
+            f"  Action: [one specific suggestion]"
+        )
+
+        try:
+            response = judge_client.chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=256,
+            )
+            return response.content
+        except Exception as e:
+            logger.warning("Failed to generate LLM scorecard: %s", e)
+            return (
+                f"{agent_output.role} SCORECARD:\n"
+                f"  Quality: 5/10\n"
+                f"  Completeness: 5/10\n"
+                f"  Usefulness to team: 5/10\n"
+                f"  Action: Review your output for completeness and clarity."
+            )
