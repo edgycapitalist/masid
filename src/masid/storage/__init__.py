@@ -217,3 +217,27 @@ class ExperimentDB:
         with self._connect() as conn:
             row = conn.execute("SELECT COUNT(*) as n FROM trials").fetchone()
             return row["n"] if row else 0
+
+    def count_trials_for_cell(
+        self,
+        architecture: str,
+        domain: str,
+        task_id: str,
+    ) -> int:
+        """Count existing trials for a specific arch × domain × task cell."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) as n FROM trials "
+                "WHERE architecture = ? AND domain = ? AND task_id = ?",
+                (architecture, domain, task_id),
+            ).fetchone()
+            return row["n"] if row else 0
+
+    def max_seed(self) -> int:
+        """Return the highest seed used so far, or -1 if empty."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT MAX(seed) as m FROM trials"
+            ).fetchone()
+            val = row["m"] if row else None
+            return val if val is not None else -1

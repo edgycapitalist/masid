@@ -123,27 +123,55 @@ def run(
 @main.command()
 @click.option("--config", "config_path", required=True, help="Path to batch config YAML")
 def batch(config_path: str) -> None:
-    """Run a batch of trials from a config file."""
+    """Run a batch of trials from a config file.
+
+    Safely resumes: checks the database for existing trials and only
+    runs the remaining trials needed per cell. Seeds start above the
+    highest seed already in the database to avoid duplicates.
+    """
     _setup_logging("INFO")
     config = load_config(config_path)
     db = ExperimentDB(config.storage.db_path)
     runner = TrialRunner(config=config, db=db)
 
+    # Start seeds above anything already in the DB
+    next_seed = db.max_seed() + 1
+    if next_seed < 42:
+        next_seed = 42  # Default starting seed
+
+    target = config.experiment.trials_per_cell
     total = 0
+    skipped = 0
     errors = 0
+
     for arch in config.architectures:
         for domain in config.domains:
             tasks = get_tasks(domain)
             for task in tasks:
-                for trial_num in range(config.experiment.trials_per_cell):
-                    seed = (
-                        config.experiment.seed + total
-                        if config.experiment.seed is not None
-                        else random.randint(0, 2**31)
+                existing = db.count_trials_for_cell(arch, domain, task.task_id)
+                needed = max(0, target - existing)
+
+                if needed == 0:
+                    skipped += target
+                    console.print(
+                        f"[dim]  Skipping {arch} × {domain} × {task.task_id} "
+                        f"({existing}/{target} already done)[/dim]"
                     )
+                    continue
+
+                if existing > 0:
+                    console.print(
+                        f"[dim]  {arch} × {domain} × {task.task_id}: "
+                        f"{existing}/{target} done, running {needed} more[/dim]"
+                    )
+
+                for trial_num in range(needed):
+                    seed = next_seed
+                    next_seed += 1
+
                     console.print(
                         f"[dim]Trial {total + 1}: {arch} × {domain} × {task.task_id} "
-                        f"(trial {trial_num + 1}/{config.experiment.trials_per_cell}, "
+                        f"(trial {existing + trial_num + 1}/{target}, "
                         f"seed={seed})[/dim]"
                     )
                     try:
@@ -158,7 +186,10 @@ def batch(config_path: str) -> None:
                         errors += 1
                     total += 1
 
-    console.print(f"\n[bold green]Batch complete: {total} trials run ({errors} errors).[/bold green]")
+    console.print(
+        f"\n[bold green]Batch complete: {total} trials run, "
+        f"{skipped} skipped ({errors} errors).[/bold green]"
+    )
     console.print(f"Results saved to: {config.storage.db_path}")
 
 
