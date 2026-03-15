@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional
-from unittest.mock import MagicMock
-
 import pytest
 
 from masid.models import LLMClient, LLMResponse
-
 
 # ---------------------------------------------------------------------------
 # Mock LLM client that returns deterministic responses without a real model
@@ -20,7 +15,7 @@ class MockLLMClient(LLMClient):
 
     def __init__(
         self,
-        responses: Optional[list[str]] = None,
+        responses: list[str] | None = None,
         **kwargs: object,
     ) -> None:
         # Don't call super().__init__ to avoid requiring a real endpoint
@@ -39,8 +34,8 @@ class MockLLMClient(LLMClient):
     def chat(
         self,
         messages: list[dict[str, str]],
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse:
         self._call_log.append(messages)
         response_text = self._responses[self._call_count % len(self._responses)]

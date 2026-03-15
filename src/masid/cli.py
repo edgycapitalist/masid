@@ -10,9 +10,7 @@ Usage:
 from __future__ import annotations
 
 import logging
-import random
 import sys
-from pathlib import Path
 
 import click
 from rich.console import Console

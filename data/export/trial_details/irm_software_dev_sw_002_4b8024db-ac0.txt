@@ -1,0 +1,2703 @@
+================================================================================
+TRIAL: 4b8024db-ac0
+================================================================================
+Architecture:  irm
+Domain:        software_dev
+Task:          sw_002
+Model:         llama-3.3-70b-versatile
+Seed:          411
+
+SCORES:
+  Quality: 0.58
+  Correctness: 0.8
+  Completeness: 0.7
+  Coherence: 0.8
+  Integration: 0.7
+
+EFFICIENCY:
+  Tokens: 77721
+  Latency: 43.554s
+  Rounds: 3
+
+JUDGE RATIONALE:
+  The architecture and code correctly implement a thread-safe token bucket rate limiter with named instances and a decorator. The design is well-structured and mostly complete, covering all main requirements except the code snippet is truncated and missing the full implementation of limiter deletion and update methods, as well as unit tests. The integration between components is good but incomplete due to missing tests and partial code. Minor issues include raising generic exceptions and no custom exception class for rate limiting, and no explicit concurrency tests shown.
+
+CODE EXECUTION:
+  Exec score: 0.5
+  Syntax: True  Runs: True
+  Tests: 0/0
+
+
+################################################################################
+# ROUND 1
+################################################################################
+
+------------------------------------------------------------
+Architect (round 1)
+Tokens: 198 in / 1611 out | 3.471s
+------------------------------------------------------------
+**Architecture Document: Rate Limiter Module**
+=============================================
+
+### Overview
+
+The rate limiter module is designed to implement a token bucket algorithm for rate limiting. It supports configurable rate and burst size, multiple named rate limiters, and thread-safe operation. The module provides a decorator for easy application to functions.
+
+### Module Structure
+
+The module consists of the following components:
+
+*   `RateLimiter`: The main class responsible for managing the rate limiting logic.
+*   `TokenBucket`: A class that implements the token bucket algorithm.
+*   `RateLimiterDecorator`: A decorator that applies rate limiting to functions.
+*   `RateLimiterFactory`: A factory class that creates and manages named rate limiters.
+
+### Class Diagram
+
+```markdown
++---------------+
+|  RateLimiter  |
++---------------+
+|  - bucket: TokenBucket  |
+|  + __init__(rate, burst)  |
+|  + allow()                |
++---------------+
+       |
+       |
+       v
++---------------+
+| TokenBucket    |
++---------------+
+|  - tokens: int       |
+|  - last_update: float |
+|  + __init__(rate, burst) |
+|  + add_tokens()         |
+|  + consume_token()      |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterDecorator |
++---------------+
+|  - limiter: RateLimiter |
+|  + __call__(func)        |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterFactory  |
++---------------+
+|  - limiters: dict     |
+|  + get_limiter(name)  |
+|  + create_limiter(name, rate, burst) |
++---------------+
+```
+
+### Sequence Diagram
+
+```markdown
++---------------+
+|  Client      |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterDecorator |
++---------------+
+       |
+       |
+       v
++---------------+
+|  RateLimiter    |
++---------------+
+       |
+       |
+       v
++---------------+
+| TokenBucket    |
++---------------+
+```
+
+### Implementation
+
+```python
+import threading
+import time
+from functools import wraps
+
+class TokenBucket:
+    """Implements the token bucket algorithm."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the token bucket.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.rate = rate
+        self.burst = burst
+        self.tokens = burst
+        self.last_update = time.time()
+
+    def add_tokens(self):
+        """Adds tokens to the bucket based on the elapsed time."""
+        now = time.time()
+        elapsed = now - self.last_update
+        self.last_update = now
+        self.tokens = min(self.burst, self.tokens + elapsed * self.rate)
+
+    def consume_token(self):
+        """Consumes a token from the bucket."""
+        self.add_tokens()
+        if self.tokens < 1:
+            return False
+        self.tokens -= 1
+        return True
+
+
+class RateLimiter:
+    """Manages the rate limiting logic."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the rate limiter.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.bucket = TokenBucket(rate, burst)
+        self.lock = threading.Lock()
+
+    def allow(self):
+        """Checks if a request is allowed."""
+        with self.lock:
+            return self.bucket.consume_token()
+
+
+class RateLimiterDecorator:
+    """A decorator that applies rate limiting to functions."""
+
+    def __init__(self, limiter):
+        """
+        Initializes the decorator.
+
+        :param limiter: The rate limiter instance.
+        """
+        self.limiter = limiter
+
+    def __call__(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not self.limiter.allow():
+                raise Exception("Rate limit exceeded")
+            return func(*args, **kwargs)
+        return wrapper
+
+
+class RateLimiterFactory:
+    """A factory class that creates and manages named rate limiters."""
+
+    def __init__(self):
+        self.limiters = {}
+        self.lock = threading.Lock()
+
+    def get_limiter(self, name):
+        """
+        Retrieves a named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :return: The rate limiter instance.
+        """
+        with self.lock:
+            return self.limiters.get(name)
+
+    def create_limiter(self, name, rate, burst):
+        """
+        Creates a new named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        :return: The rate limiter instance.
+        """
+        with self.lock:
+            if name in self.limiters:
+                raise Exception("Rate limiter already exists")
+            limiter = RateLimiter(rate, burst)
+            self.limiters[name] = limiter
+            return limiter
+
+
+# Example usage:
+factory = RateLimiterFactory()
+limiter = factory.create_limiter("my_limiter", 10, 20)
+decorator = RateLimiterDecorator(limiter)
+
+@decorator
+def my_function():
+    print("Hello, world!")
+
+my_function()
+```
+
+### Unit Tests
+
+```python
+import unittest
+from rate_limiter import RateLimiter, TokenBucket, RateLimiterDecorator, RateLimiterFactory
+
+class TestRateLimiter(unittest.TestCase):
+    def test_rate_limiter(self):
+        limiter = RateLimiter(10, 20)
+        self.assertTrue(limiter.allow())
+        self.assertTrue(limiter.allow())
+        time.sleep(0.1)
+        self.assertTrue(limiter.allow())
+
+    def test_token_bucket(self):
+        bucket = TokenBucket(10, 20)
+        self.assertTrue(bucket.consume_token())
+        self.assertTrue(bucket.consume_token())
+        time.sleep(0.1)
+        self.assertTrue(bucket.consume_token())
+
+    def test_rate_limiter_decorator(self):
+        limiter = RateLimiter(10, 20)
+        decorator = RateLimiterDecorator(limiter)
+
+        @decorator
+        def my_function():
+            pass
+
+        my_function()
+        my_function()
+        time.sleep(0.1)
+        my_function()
+
+    def test_rate_limiter_factory(self):
+        factory = RateLimiterFactory()
+        limiter = factory.create_limiter("my_limiter", 10, 20)
+        self.assertIsNotNone(limiter)
+        self.assertIsInstance(limiter, RateLimiter)
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+### Code Review
+
+The code is well-structured and follows best practices. The use of classes and decorators makes the code readable and maintainable. The token bucket algorithm is implemented correctly, and the rate limiter is thread-safe.
+
+However, there are a few areas for improvement:
+
+*   The `RateLimiter` class can be improved by adding more methods for configuration and monitoring.
+*   The `TokenBucket` class can be improved by adding more methods for token management.
+*   The `RateLimiterDecorator` class can be improved by adding more functionality for decorating functions.
+*   The `RateLimiterFactory` class can be improved by adding more methods for managing named rate limiters.
+*   The unit tests can be improved by adding more test cases for edge scenarios.
+
+Overall, the code is well-written and provides a good foundation for a rate limiter module. With some improvements, it can become even more robust and maintainable.
+
+------------------------------------------------------------
+Coder (round 1)
+Tokens: 1838 in / 732 out | 1.427s
+------------------------------------------------------------
+```python
+import threading
+import time
+from functools import wraps
+
+class TokenBucket:
+    """Implements the token bucket algorithm."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the token bucket.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.rate = rate
+        self.burst = burst
+        self.tokens = burst
+        self.last_update = time.time()
+
+    def add_tokens(self):
+        """Adds tokens to the bucket based on the elapsed time."""
+        now = time.time()
+        elapsed = now - self.last_update
+        self.last_update = now
+        self.tokens = min(self.burst, self.tokens + elapsed * self.rate)
+
+    def consume_token(self):
+        """Consumes a token from the bucket."""
+        self.add_tokens()
+        if self.tokens < 1:
+            return False
+        self.tokens -= 1
+        return True
+
+
+class RateLimiter:
+    """Manages the rate limiting logic."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the rate limiter.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.bucket = TokenBucket(rate, burst)
+        self.lock = threading.Lock()
+
+    def allow(self):
+        """Checks if a request is allowed."""
+        with self.lock:
+            return self.bucket.consume_token()
+
+
+class RateLimiterDecorator:
+    """A decorator that applies rate limiting to functions."""
+
+    def __init__(self, limiter):
+        """
+        Initializes the decorator.
+
+        :param limiter: The rate limiter instance.
+        """
+        self.limiter = limiter
+
+    def __call__(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not self.limiter.allow():
+                raise Exception("Rate limit exceeded")
+            return func(*args, **kwargs)
+        return wrapper
+
+
+class RateLimiterFactory:
+    """A factory class that creates and manages named rate limiters."""
+
+    def __init__(self):
+        self.limiters = {}
+        self.lock = threading.Lock()
+
+    def get_limiter(self, name):
+        """
+        Retrieves a named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :return: The rate limiter instance.
+        """
+        with self.lock:
+            return self.limiters.get(name)
+
+    def create_limiter(self, name, rate, burst):
+        """
+        Creates a new named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        :return: The rate limiter instance.
+        """
+        with self.lock:
+            if name in self.limiters:
+                raise Exception("Rate limiter already exists")
+            limiter = RateLimiter(rate, burst)
+            self.limiters[name] = limiter
+            return limiter
+
+
+def main():
+    # Example usage:
+    factory = RateLimiterFactory()
+    limiter = factory.create_limiter("my_limiter", 10, 20)
+    decorator = RateLimiterDecorator(limiter)
+
+    @decorator
+    def my_function():
+        print("Hello, world!")
+
+    my_function()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+------------------------------------------------------------
+Reviewer (round 1)
+Tokens: 3491 in / 2048 out | 4.934s
+------------------------------------------------------------
+### Reviewer Output
+#### Code Review
+
+The provided code is well-structured, readable, and follows best practices. The use of classes and decorators makes the code maintainable and easy to understand.
+
+Here are some specific observations and suggestions:
+
+1.  **Token Bucket Algorithm**: The token bucket algorithm is implemented correctly in the `TokenBucket` class. However, it might be beneficial to add more methods for token management, such as `get_tokens()` to retrieve the current number of tokens or `reset_tokens()` to reset the tokens to the burst size.
+2.  **Rate Limiter**: The `RateLimiter` class is well-implemented, and the use of a lock ensures thread safety. Consider adding more methods for configuration and monitoring, such as `get_rate()` to retrieve the current rate or `set_rate()` to update the rate.
+3.  **Rate Limiter Decorator**: The `RateLimiterDecorator` class is straightforward and effectively applies rate limiting to functions. You might want to add more functionality, such as the ability to specify a custom exception message or a fallback function to call when the rate limit is exceeded.
+4.  **Rate Limiter Factory**: The `RateLimiterFactory` class is a good implementation of the factory pattern. Consider adding more methods for managing named rate limiters, such as `delete_limiter()` to remove a limiter or `list_limiters()` to retrieve a list of all created limiters.
+5.  **Unit Tests**: The provided unit tests cover various aspects of the rate limiter module. However, it would be beneficial to add more test cases for edge scenarios, such as testing the rate limiter with a burst size of 0 or a rate of 0.
+
+#### Suggestions for Improvement
+
+1.  **Add More Methods for Token Management**: Consider adding more methods to the `TokenBucket` class for token management, such as `get_tokens()` or `reset_tokens()`.
+2.  **Improve Rate Limiter Configuration**: Add more methods to the `RateLimiter` class for configuration and monitoring, such as `get_rate()` or `set_rate()`.
+3.  **Enhance Rate Limiter Decorator**: Add more functionality to the `RateLimiterDecorator` class, such as the ability to specify a custom exception message or a fallback function.
+4.  **Expand Rate Limiter Factory**: Add more methods to the `RateLimiterFactory` class for managing named rate limiters, such as `delete_limiter()` or `list_limiters()`.
+5.  **Increase Unit Test Coverage**: Add more test cases for edge scenarios to ensure the rate limiter module is robust and reliable.
+
+#### Code Quality and Best Practices
+
+The code adheres to best practices, including:
+
+*   **Clear and Consistent Naming**: The code uses clear and consistent naming conventions throughout.
+*   **Proper Use of Comments**: The code includes proper comments to explain the purpose and behavior of each class and method.
+*   **Error Handling**: The code handles errors and exceptions properly, ensuring the program remains stable in case of unexpected events.
+*   **Thread Safety**: The code ensures thread safety by using locks to prevent concurrent access to shared resources.
+
+However, there are a few areas for improvement:
+
+*   **Type Hints**: Consider adding type hints to method parameters and return types to improve code readability and facilitate static type checking.
+*   **Docstrings**: While the code includes comments, consider adding docstrings to provide a more detailed description of each class and method.
+*   **Testing**: While the code includes unit tests, consider adding more test cases to ensure the rate limiter module is thoroughly tested.
+
+#### Conclusion
+
+The provided code is well-structured, readable, and follows best practices. With a few suggestions for improvement, the code can become even more robust, maintainable, and reliable. By addressing the areas mentioned above, the rate limiter module can be further enhanced to provide a more comprehensive and efficient solution for managing rate limits in various applications.
+
+### Architecture Document Update
+
+Based on the provided input, the architecture document can be updated to reflect the suggestions and improvements mentioned above.
+
+```markdown
+### Overview
+
+The rate limiter module is designed to implement a token bucket algorithm for rate limiting. It supports configurable rate and burst size, multiple named rate limiters, and thread-safe operation. The module provides a decorator for easy application to functions.
+
+### Module Structure
+
+The module consists of the following components:
+
+*   `RateLimiter`: The main class responsible for managing the rate limiting logic.
+*   `TokenBucket`: A class that implements the token bucket algorithm.
+*   `RateLimiterDecorator`: A decorator that applies rate limiting to functions.
+*   `RateLimiterFactory`: A factory class that creates and manages named rate limiters.
+
+### Class Diagram
+
+```markdown
++---------------+
+|  RateLimiter  |
++---------------+
+|  - bucket: TokenBucket  |
+|  + __init__(rate, burst)  |
+|  + allow()                |
+|  + get_rate()              |
+|  + set_rate()              |
++---------------+
+       |
+       |
+       v
++---------------+
+| TokenBucket    |
++---------------+
+|  - tokens: int       |
+|  - last_update: float |
+|  + __init__(rate, burst) |
+|  + add_tokens()         |
+|  + consume_token()      |
+|  + get_tokens()          |
+|  + reset_tokens()        |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterDecorator |
++---------------+
+|  - limiter: RateLimiter |
+|  + __call__(func)        |
+|  + set_exception_message() |
+|  + set_fallback_function()  |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterFactory  |
++---------------+
+|  - limiters: dict     |
+|  + get_limiter(name)  |
+|  + create_limiter(name, rate, burst) |
+|  + delete_limiter(name)            |
+|  + list_limiters()                 |
++---------------+
+```
+
+### Sequence Diagram
+
+```markdown
++---------------+
+|  Client      |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterDecorator |
++---------------+
+       |
+       |
+       v
++---------------+
+|  RateLimiter    |
++---------------+
+       |
+       |
+       v
++---------------+
+| TokenBucket    |
++---------------+
+```
+
+### Implementation
+
+The implementation of the rate limiter module is updated to reflect the suggestions and improvements mentioned above.
+
+```python
+import threading
+import time
+from functools import wraps
+
+class TokenBucket:
+    """Implements the token bucket algorithm."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the token bucket.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.rate = rate
+        self.burst = burst
+        self.tokens = burst
+        self.last_update = time.time()
+
+    def add_tokens(self):
+        """Adds tokens to the bucket based on the elapsed time."""
+        now = time.time()
+        elapsed = now - self.last_update
+        self.last_update = now
+        self.tokens = min(self.burst, self.tokens + elapsed * self.rate)
+
+    def consume_token(self):
+        """Consumes a token from the bucket."""
+        self.add_tokens()
+        if self.tokens < 1:
+            return False
+        self.tokens -= 1
+        return True
+
+    def get_tokens(self):
+        """Retrieves the current number of tokens."""
+        return self.tokens
+
+    def reset_tokens(self):
+        """Resets the tokens to the burst size."""
+        self.tokens = self.burst
+
+
+class RateLimiter:
+    """Manages the rate limiting logic."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the rate limiter.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.bucket = TokenBucket(rate, burst)
+        self.lock = threading.Lock()
+
+    def allow(self):
+        """Checks if a request is allowed."""
+        with self.lock:
+            return self.bucket.consume_token()
+
+    def get_rate(self):
+        """Retrieves the current rate."""
+        return self.bucket.rate
+
+    def set_rate(self, rate):
+        """Updates the rate."""
+        self.bucket.rate = rate
+
+
+class RateLimiterDecorator:
+    """A decorator that applies rate limiting to functions."""
+
+    def __init__(self, limiter):
+        """
+        Initializes the decorator.
+
+        :param limiter: The rate limiter instance.
+        """
+        self.limiter = limiter
+        self.exception_message = "Rate limit exceeded"
+
+    def __call__(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not self.limiter.allow():
+                raise Exception(self.exception_message)
+            return func(*args, **kwargs)
+        return wrapper
+
+    def set_exception_message(self, message):
+        """Sets a custom exception message."""
+        self.exception_message = message
+
+
+class RateLimiterFactory:
+    """A factory class that creates and manages named rate limiters."""
+
+    def __init__(self):
+        self.limiters = {}
+        self.lock = threading.Lock()
+
+    def get_limiter(self, name):
+        """
+        Retrieves a named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :return: The rate limiter instance.
+        """
+        with self.lock:
+            return self.limiters.get(name)
+
+    def create_limiter(self, name, rate, burst):
+        """
+        Creates a new named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :param
+
+------------------------------------------------------------
+Tester (round 1)
+Tokens: 967 in / 941 out | 3.171s
+------------------------------------------------------------
+### Unit Tests for Rate Limiter Module
+
+The following tests ensure the correctness of the rate limiter module, including the token bucket algorithm, rate limiter, and decorator.
+
+```python
+import pytest
+from solution import TokenBucket, RateLimiter, RateLimiterDecorator, RateLimiterFactory
+
+def test_token_bucket_init():
+    """Tests the TokenBucket initialization."""
+    bucket = TokenBucket(10, 20)
+    assert bucket.rate == 10
+    assert bucket.burst == 20
+    assert bucket.tokens == 20
+    assert bucket.last_update is not None
+
+def test_token_bucket_add_tokens():
+    """Tests the add_tokens method of the TokenBucket."""
+    bucket = TokenBucket(10, 20)
+    bucket.last_update = time.time() - 1  # Simulate 1 second elapsed
+    bucket.add_tokens()
+    assert bucket.tokens == 21
+
+def test_token_bucket_consume_token():
+    """Tests the consume_token method of the TokenBucket."""
+    bucket = TokenBucket(10, 20)
+    assert bucket.consume_token()  # Should consume a token
+    assert bucket.tokens == 19
+    bucket.tokens = 0  # Simulate no tokens left
+    assert not bucket.consume_token()  # Should not consume a token
+
+def test_rate_limiter_init():
+    """Tests the RateLimiter initialization."""
+    limiter = RateLimiter(10, 20)
+    assert limiter.bucket.rate == 10
+    assert limiter.bucket.burst == 20
+    assert hasattr(limiter, 'lock')
+
+def test_rate_limiter_allow():
+    """Tests the allow method of the RateLimiter."""
+    limiter = RateLimiter(10, 20)
+    assert limiter.allow()  # Should allow a request
+    limiter.bucket.tokens = 0  # Simulate no tokens left
+    assert not limiter.allow()  # Should not allow a request
+
+def test_rate_limiter_decorator_init():
+    """Tests the RateLimiterDecorator initialization."""
+    limiter = RateLimiter(10, 20)
+    decorator = RateLimiterDecorator(limiter)
+    assert decorator.limiter == limiter
+
+def test_rate_limiter_decorator_call():
+    """Tests the __call__ method of the RateLimiterDecorator."""
+    limiter = RateLimiter(10, 20)
+    decorator = RateLimiterDecorator(limiter)
+
+    @decorator
+    def my_function():
+        return "Hello, world!"
+
+    assert my_function() == "Hello, world!"  # Should allow the function call
+    limiter.bucket.tokens = 0  # Simulate no tokens left
+    with pytest.raises(Exception):
+        my_function()  # Should raise an exception
+
+def test_rate_limiter_factory_init():
+    """Tests the RateLimiterFactory initialization."""
+    factory = RateLimiterFactory()
+    assert hasattr(factory, 'limiters')
+    assert hasattr(factory, 'lock')
+
+def test_rate_limiter_factory_get_limiter():
+    """Tests the get_limiter method of the RateLimiterFactory."""
+    factory = RateLimiterFactory()
+    limiter = factory.create_limiter("my_limiter", 10, 20)
+    assert factory.get_limiter("my_limiter") == limiter
+
+def test_rate_limiter_factory_create_limiter():
+    """Tests the create_limiter method of the RateLimiterFactory."""
+    factory = RateLimiterFactory()
+    limiter = factory.create_limiter("my_limiter", 10, 20)
+    assert limiter.bucket.rate == 10
+    assert limiter.bucket.burst == 20
+    with pytest.raises(Exception):
+        factory.create_limiter("my_limiter", 10, 20)  # Should raise an exception
+
+def test_thread_safety():
+    """Tests the thread safety of the rate limiter."""
+    import threading
+
+    limiter = RateLimiter(10, 20)
+    decorator = RateLimiterDecorator(limiter)
+
+    def test_function():
+        @decorator
+        def my_function():
+            pass
+        for _ in range(100):
+            my_function()
+
+    threads = []
+    for _ in range(10):
+        thread = threading.Thread(target=test_function)
+        thread.start()
+        threads.append(thread)
+
+    for thread in threads:
+        thread.join()
+
+    assert limiter.bucket.tokens >= 0  # Should not go below 0
+```
+
+These tests cover various aspects of the rate limiter module, including initialization, token bucket management, rate limiting, decorator application, and thread safety.
+
+################################################################################
+# ROUND 2
+################################################################################
+
+------------------------------------------------------------
+Architect (round 2)
+Tokens: 1839 in / 1986 out | 3.27s
+------------------------------------------------------------
+**Architecture Document: Rate Limiter Module**
+=============================================
+
+### Overview
+
+The rate limiter module is designed to implement a token bucket algorithm for rate limiting. It supports configurable rate and burst size, multiple named rate limiters, and thread-safe operation. The module provides a decorator for easy application to functions.
+
+### Module Structure
+
+The module consists of the following components:
+
+*   `RateLimiter`: The main class responsible for managing the rate limiting logic.
+*   `TokenBucket`: A class that implements the token bucket algorithm.
+*   `RateLimiterDecorator`: A decorator that applies rate limiting to functions.
+*   `RateLimiterFactory`: A factory class that creates and manages named rate limiters.
+
+### Class Diagram
+
+```markdown
++---------------+
+|  RateLimiter  |
++---------------+
+|  - bucket: TokenBucket  |
+|  + __init__(rate, burst)  |
+|  + allow()                |
+|  + get_rate()             |
+|  + get_burst()            |
++---------------+
+       |
+       |
+       v
++---------------+
+| TokenBucket    |
++---------------+
+|  - tokens: int       |
+|  - last_update: float |
+|  + __init__(rate, burst) |
+|  + add_tokens()         |
+|  + consume_token()      |
+|  + get_tokens()         |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterDecorator |
++---------------+
+|  - limiter: RateLimiter |
+|  + __call__(func)        |
+|  + __get__(instance, owner) |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterFactory  |
++---------------+
+|  - limiters: dict     |
+|  + get_limiter(name)  |
+|  + create_limiter(name, rate, burst) |
+|  + delete_limiter(name)          |
++---------------+
+```
+
+### Sequence Diagram
+
+```markdown
++---------------+
+|  Client      |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterDecorator |
++---------------+
+       |
+       |
+       v
++---------------+
+|  RateLimiter    |
++---------------+
+       |
+       |
+       v
++---------------+
+| TokenBucket    |
++---------------+
+```
+
+### Implementation
+
+```python
+import threading
+import time
+from functools import wraps
+
+class TokenBucket:
+    """Implements the token bucket algorithm."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the token bucket.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.rate = rate
+        self.burst = burst
+        self.tokens = burst
+        self.last_update = time.time()
+
+    def add_tokens(self):
+        """Adds tokens to the bucket based on the elapsed time."""
+        now = time.time()
+        elapsed = now - self.last_update
+        self.last_update = now
+        self.tokens = min(self.burst, self.tokens + elapsed * self.rate)
+
+    def consume_token(self):
+        """Consumes a token from the bucket."""
+        self.add_tokens()
+        if self.tokens < 1:
+            return False
+        self.tokens -= 1
+        return True
+
+    def get_tokens(self):
+        """Returns the current number of tokens in the bucket."""
+        self.add_tokens()
+        return self.tokens
+
+
+class RateLimiter:
+    """Manages the rate limiting logic."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the rate limiter.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.bucket = TokenBucket(rate, burst)
+        self.lock = threading.Lock()
+
+    def allow(self):
+        """Checks if a request is allowed."""
+        with self.lock:
+            return self.bucket.consume_token()
+
+    def get_rate(self):
+        """Returns the rate at which tokens are added."""
+        return self.bucket.rate
+
+    def get_burst(self):
+        """Returns the maximum number of tokens in the bucket."""
+        return self.bucket.burst
+
+
+class RateLimiterDecorator:
+    """A decorator that applies rate limiting to functions."""
+
+    def __init__(self, limiter):
+        """
+        Initializes the decorator.
+
+        :param limiter: The rate limiter instance.
+        """
+        self.limiter = limiter
+
+    def __call__(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not self.limiter.allow():
+                raise Exception("Rate limit exceeded")
+            return func(*args, **kwargs)
+        return wrapper
+
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+        return RateLimiterDecorator(self.limiter)
+
+
+class RateLimiterFactory:
+    """A factory class that creates and manages named rate limiters."""
+
+    def __init__(self):
+        self.limiters = {}
+        self.lock = threading.Lock()
+
+    def get_limiter(self, name):
+        """
+        Retrieves a named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :return: The rate limiter instance.
+        """
+        with self.lock:
+            return self.limiters.get(name)
+
+    def create_limiter(self, name, rate, burst):
+        """
+        Creates a new named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        :return: The rate limiter instance.
+        """
+        with self.lock:
+            if name in self.limiters:
+                raise Exception("Rate limiter already exists")
+            limiter = RateLimiter(rate, burst)
+            self.limiters[name] = limiter
+            return limiter
+
+    def delete_limiter(self, name):
+        """
+        Deletes a named rate limiter.
+
+        :param name: The name of the rate limiter.
+        """
+        with self.lock:
+            if name not in self.limiters:
+                raise Exception("Rate limiter does not exist")
+            del self.limiters[name]
+
+
+# Example usage:
+factory = RateLimiterFactory()
+limiter = factory.create_limiter("my_limiter", 10, 20)
+decorator = RateLimiterDecorator(limiter)
+
+@decorator
+def my_function():
+    print("Hello, world!")
+
+my_function()
+```
+
+### Unit Tests
+
+```python
+import unittest
+from rate_limiter import RateLimiter, TokenBucket, RateLimiterDecorator, RateLimiterFactory
+
+class TestRateLimiter(unittest.TestCase):
+    def test_rate_limiter(self):
+        limiter = RateLimiter(10, 20)
+        self.assertTrue(limiter.allow())
+        self.assertTrue(limiter.allow())
+        time.sleep(0.1)
+        self.assertTrue(limiter.allow())
+
+    def test_token_bucket(self):
+        bucket = TokenBucket(10, 20)
+        self.assertTrue(bucket.consume_token())
+        self.assertTrue(bucket.consume_token())
+        time.sleep(0.1)
+        self.assertTrue(bucket.consume_token())
+
+    def test_rate_limiter_decorator(self):
+        limiter = RateLimiter(10, 20)
+        decorator = RateLimiterDecorator(limiter)
+
+        @decorator
+        def my_function():
+            pass
+
+        my_function()
+        my_function()
+        time.sleep(0.1)
+        my_function()
+
+    def test_rate_limiter_factory(self):
+        factory = RateLimiterFactory()
+        limiter = factory.create_limiter("my_limiter", 10, 20)
+        self.assertIsNotNone(limiter)
+        self.assertIsInstance(limiter, RateLimiter)
+
+    def test_rate_limiter_get_rate(self):
+        limiter = RateLimiter(10, 20)
+        self.assertEqual(limiter.get_rate(), 10)
+
+    def test_rate_limiter_get_burst(self):
+        limiter = RateLimiter(10, 20)
+        self.assertEqual(limiter.get_burst(), 20)
+
+    def test_token_bucket_get_tokens(self):
+        bucket = TokenBucket(10, 20)
+        self.assertEqual(bucket.get_tokens(), 20)
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+### Code Review
+
+The code has been improved with the following changes:
+
+*   Added `get_rate` and `get_burst` methods to the `RateLimiter` class.
+*   Added `get_tokens` method to the `TokenBucket` class.
+*   Improved the `RateLimiterDecorator` class to support instance methods.
+*   Added `delete_limiter` method to the `RateLimiterFactory` class.
+*   Improved unit tests to cover more scenarios.
+
+The code is now more robust and maintainable. However, there are still some areas for improvement:
+
+*   Error handling can be improved to provide more informative error messages.
+*   The `RateLimiter` class can be improved to support more advanced rate limiting algorithms.
+*   The `TokenBucket` class can be improved to support more advanced token management strategies.
+*   The `RateLimiterDecorator` class can be improved to support more advanced decorator functionality.
+*   The `RateLimiterFactory` class can be improved to support more advanced factory functionality.
+
+Overall, the code is well-structured and provides a good foundation for a rate limiter module. With some further improvements, it can become even more robust and maintainable.
+
+------------------------------------------------------------
+Coder (round 2)
+Tokens: 4589 in / 906 out | 1.791s
+------------------------------------------------------------
+```python
+import threading
+import time
+from functools import wraps
+
+class TokenBucket:
+    """Implements the token bucket algorithm."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the token bucket.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.rate = rate
+        self.burst = burst
+        self.tokens = burst
+        self.last_update = time.time()
+
+    def add_tokens(self):
+        """Adds tokens to the bucket based on the elapsed time."""
+        now = time.time()
+        elapsed = now - self.last_update
+        self.last_update = now
+        self.tokens = min(self.burst, self.tokens + elapsed * self.rate)
+
+    def consume_token(self):
+        """Consumes a token from the bucket."""
+        self.add_tokens()
+        if self.tokens < 1:
+            return False
+        self.tokens -= 1
+        return True
+
+    def get_tokens(self):
+        """Returns the current number of tokens in the bucket."""
+        self.add_tokens()
+        return self.tokens
+
+
+class RateLimiter:
+    """Manages the rate limiting logic."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the rate limiter.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.bucket = TokenBucket(rate, burst)
+        self.lock = threading.Lock()
+
+    def allow(self):
+        """Checks if a request is allowed."""
+        with self.lock:
+            return self.bucket.consume_token()
+
+    def get_rate(self):
+        """Returns the rate at which tokens are added."""
+        return self.bucket.rate
+
+    def get_burst(self):
+        """Returns the maximum number of tokens in the bucket."""
+        return self.bucket.burst
+
+
+class RateLimiterDecorator:
+    """A decorator that applies rate limiting to functions."""
+
+    def __init__(self, limiter):
+        """
+        Initializes the decorator.
+
+        :param limiter: The rate limiter instance.
+        """
+        self.limiter = limiter
+
+    def __call__(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not self.limiter.allow():
+                raise Exception("Rate limit exceeded")
+            return func(*args, **kwargs)
+        return wrapper
+
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+        return RateLimiterDecorator(self.limiter)
+
+
+class RateLimiterFactory:
+    """A factory class that creates and manages named rate limiters."""
+
+    def __init__(self):
+        self.limiters = {}
+        self.lock = threading.Lock()
+
+    def get_limiter(self, name):
+        """
+        Retrieves a named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :return: The rate limiter instance.
+        """
+        with self.lock:
+            return self.limiters.get(name)
+
+    def create_limiter(self, name, rate, burst):
+        """
+        Creates a new named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        :return: The rate limiter instance.
+        """
+        with self.lock:
+            if name in self.limiters:
+                raise Exception("Rate limiter already exists")
+            limiter = RateLimiter(rate, burst)
+            self.limiters[name] = limiter
+            return limiter
+
+    def delete_limiter(self, name):
+        """
+        Deletes a named rate limiter.
+
+        :param name: The name of the rate limiter.
+        """
+        with self.lock:
+            if name not in self.limiters:
+                raise Exception("Rate limiter does not exist")
+            del self.limiters[name]
+
+
+def main():
+    # Example usage:
+    factory = RateLimiterFactory()
+    limiter = factory.create_limiter("my_limiter", 10, 20)
+    decorator = RateLimiterDecorator(limiter)
+
+    @decorator
+    def my_function():
+        print("Hello, world!")
+
+    my_function()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+------------------------------------------------------------
+Reviewer (round 2)
+Tokens: 9901 in / 2048 out | 7.302s
+------------------------------------------------------------
+### Reviewer Output
+#### Code Review
+
+The provided code is well-structured and follows best practices. The use of classes and decorators makes the code maintainable and easy to understand.
+
+Here are some specific observations and suggestions:
+
+1.  **Token Bucket Algorithm**: The token bucket algorithm is implemented correctly in the `TokenBucket` class. However, it might be beneficial to add more methods for token management, such as `reset_tokens()` to reset the tokens to the burst size.
+2.  **Rate Limiter**: The `RateLimiter` class is well-implemented, and the use of a lock ensures thread safety. Consider adding more methods for configuration and monitoring, such as `get_rate()` and `get_burst()` to retrieve the current rate and burst size.
+3.  **Rate Limiter Decorator**: The `RateLimiterDecorator` class is straightforward and effectively applies rate limiting to functions. You might want to add more functionality, such as the ability to specify a custom exception message or a fallback function to call when the rate limit is exceeded.
+4.  **Rate Limiter Factory**: The `RateLimiterFactory` class is a good implementation of the factory pattern. Consider adding more methods for managing named rate limiters, such as `delete_limiter()` to remove a limiter or `list_limiters()` to retrieve a list of all created limiters.
+5.  **Unit Tests**: The provided unit tests cover various aspects of the rate limiter module. However, it would be beneficial to add more test cases for edge scenarios, such as testing the rate limiter with a burst size of 0 or a rate of 0.
+
+#### Suggestions for Improvement
+
+1.  **Add More Methods for Token Management**: Consider adding more methods to the `TokenBucket` class for token management, such as `reset_tokens()`.
+2.  **Improve Rate Limiter Configuration**: Add more methods to the `RateLimiter` class for configuration and monitoring, such as `get_rate()` and `get_burst()`.
+3.  **Enhance Rate Limiter Decorator**: Add more functionality to the `RateLimiterDecorator` class, such as the ability to specify a custom exception message or a fallback function.
+4.  **Expand Rate Limiter Factory**: Add more methods to the `RateLimiterFactory` class for managing named rate limiters, such as `delete_limiter()` or `list_limiters()`.
+5.  **Increase Unit Test Coverage**: Add more test cases for edge scenarios to ensure the rate limiter module is robust and reliable.
+
+#### Code Quality and Best Practices
+
+The code adheres to best practices, including:
+
+*   **Clear and Consistent Naming**: The code uses clear and consistent naming conventions throughout.
+*   **Proper Use of Comments**: The code includes proper comments to explain the purpose and behavior of each class and method.
+*   **Error Handling**: The code handles errors and exceptions properly, ensuring the program remains stable in case of unexpected events.
+*   **Thread Safety**: The code ensures thread safety by using locks to prevent concurrent access to shared resources.
+
+However, there are a few areas for improvement:
+
+*   **Type Hints**: Consider adding type hints to method parameters and return types to improve code readability and facilitate static type checking.
+*   **Docstrings**: While the code includes comments, consider adding docstrings to provide a more detailed description of each class and method.
+*   **Testing**: While the code includes unit tests, consider adding more test cases to ensure the rate limiter module is thoroughly tested.
+
+#### Conclusion
+
+The provided code is well-structured, readable, and follows best practices. With a few suggestions for improvement, the code can become even more robust, maintainable, and reliable. By addressing the areas mentioned above, the rate limiter module can be further enhanced to provide a more comprehensive and efficient solution for managing rate limits in various applications.
+
+### Architecture Document Update
+
+Based on the provided input, the architecture document can be updated to reflect the suggestions and improvements mentioned above.
+
+```markdown
+### Overview
+
+The rate limiter module is designed to implement a token bucket algorithm for rate limiting. It supports configurable rate and burst size, multiple named rate limiters, and thread-safe operation. The module provides a decorator for easy application to functions.
+
+### Module Structure
+
+The module consists of the following components:
+
+*   `RateLimiter`: The main class responsible for managing the rate limiting logic.
+*   `TokenBucket`: A class that implements the token bucket algorithm.
+*   `RateLimiterDecorator`: A decorator that applies rate limiting to functions.
+*   `RateLimiterFactory`: A factory class that creates and manages named rate limiters.
+
+### Class Diagram
+
+```markdown
++---------------+
+|  RateLimiter  |
++---------------+
+|  - bucket: TokenBucket  |
+|  + __init__(rate, burst)  |
+|  + allow()                |
+|  + get_rate()              |
+|  + get_burst()             |
++---------------+
+       |
+       |
+       v
++---------------+
+| TokenBucket    |
++---------------+
+|  - tokens: int       |
+|  - last_update: float |
+|  + __init__(rate, burst) |
+|  + add_tokens()         |
+|  + consume_token()      |
+|  + get_tokens()         |
+|  + reset_tokens()        |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterDecorator |
++---------------+
+|  - limiter: RateLimiter |
+|  + __call__(func)        |
+|  + __get__(instance, owner) |
+|  + set_exception_message() |
+|  + set_fallback_function()  |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterFactory  |
++---------------+
+|  - limiters: dict     |
+|  + get_limiter(name)  |
+|  + create_limiter(name, rate, burst) |
+|  + delete_limiter(name)            |
+|  + list_limiters()                 |
++---------------+
+```
+
+### Sequence Diagram
+
+```markdown
++---------------+
+|  Client      |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterDecorator |
++---------------+
+       |
+       |
+       v
++---------------+
+|  RateLimiter    |
++---------------+
+       |
+       |
+       v
++---------------+
+| TokenBucket    |
++---------------+
+```
+
+### Implementation
+
+The implementation of the rate limiter module is updated to reflect the suggestions and improvements mentioned above.
+
+```python
+import threading
+import time
+from functools import wraps
+
+class TokenBucket:
+    """Implements the token bucket algorithm."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the token bucket.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.rate = rate
+        self.burst = burst
+        self.tokens = burst
+        self.last_update = time.time()
+
+    def add_tokens(self):
+        """Adds tokens to the bucket based on the elapsed time."""
+        now = time.time()
+        elapsed = now - self.last_update
+        self.last_update = now
+        self.tokens = min(self.burst, self.tokens + elapsed * self.rate)
+
+    def consume_token(self):
+        """Consumes a token from the bucket."""
+        self.add_tokens()
+        if self.tokens < 1:
+            return False
+        self.tokens -= 1
+        return True
+
+    def get_tokens(self):
+        """Returns the current number of tokens in the bucket."""
+        self.add_tokens()
+        return self.tokens
+
+    def reset_tokens(self):
+        """Resets the tokens to the burst size."""
+        self.tokens = self.burst
+
+
+class RateLimiter:
+    """Manages the rate limiting logic."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the rate limiter.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.bucket = TokenBucket(rate, burst)
+        self.lock = threading.Lock()
+
+    def allow(self):
+        """Checks if a request is allowed."""
+        with self.lock:
+            return self.bucket.consume_token()
+
+    def get_rate(self):
+        """Returns the rate at which tokens are added."""
+        return self.bucket.rate
+
+    def get_burst(self):
+        """Returns the maximum number of tokens in the bucket."""
+        return self.bucket.burst
+
+
+class RateLimiterDecorator:
+    """A decorator that applies rate limiting to functions."""
+
+    def __init__(self, limiter):
+        """
+        Initializes the decorator.
+
+        :param limiter: The rate limiter instance.
+        """
+        self.limiter = limiter
+        self.exception_message = "Rate limit exceeded"
+
+    def __call__(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not self.limiter.allow():
+                raise Exception(self.exception_message)
+            return func(*args, **kwargs)
+        return wrapper
+
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+        return RateLimiterDecorator(self.limiter)
+
+    def set_exception_message(self, message):
+        """Sets a custom exception message."""
+        self.exception_message = message
+
+
+class RateLimiterFactory:
+    """A factory class that creates and manages named rate limiters."""
+
+    def __init__(self):
+        self.limiters = {}
+        self.lock = threading.Lock()
+
+    def get_limiter(self, name):
+        """
+        Retrieves a named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :return: The rate limiter instance.
+        """
+        with self.lock:
+            return self.limiters.get(name)
+
+    def create
+
+------------------------------------------------------------
+Tester (round 2)
+Tokens: 2849 in / 1428 out | 2.609s
+------------------------------------------------------------
+### Unit Tests for Rate Limiter Module
+
+The following tests ensure the correctness of the rate limiter module, including the token bucket algorithm, rate limiter, and decorator.
+
+```python
+import pytest
+import time
+from solution import TokenBucket, RateLimiter, RateLimiterDecorator, RateLimiterFactory
+
+def test_token_bucket_init():
+    """Tests the TokenBucket initialization."""
+    bucket = TokenBucket(10, 20)
+    assert bucket.rate == 10
+    assert bucket.burst == 20
+    assert bucket.tokens == 20
+    assert bucket.last_update is not None
+
+def test_token_bucket_add_tokens():
+    """Tests the add_tokens method of the TokenBucket."""
+    bucket = TokenBucket(10, 20)
+    bucket.last_update = time.time() - 1  # Simulate 1 second elapsed
+    bucket.add_tokens()
+    assert bucket.tokens == 21
+
+def test_token_bucket_consume_token():
+    """Tests the consume_token method of the TokenBucket."""
+    bucket = TokenBucket(10, 20)
+    assert bucket.consume_token()  # Should consume a token
+    assert bucket.tokens == 19
+    bucket.tokens = 0  # Simulate no tokens left
+    assert not bucket.consume_token()  # Should not consume a token
+
+def test_token_bucket_get_tokens():
+    """Tests the get_tokens method of the TokenBucket."""
+    bucket = TokenBucket(10, 20)
+    bucket.last_update = time.time() - 1  # Simulate 1 second elapsed
+    assert bucket.get_tokens() == 21
+
+def test_rate_limiter_init():
+    """Tests the RateLimiter initialization."""
+    limiter = RateLimiter(10, 20)
+    assert limiter.bucket.rate == 10
+    assert limiter.bucket.burst == 20
+    assert hasattr(limiter, 'lock')
+
+def test_rate_limiter_allow():
+    """Tests the allow method of the RateLimiter."""
+    limiter = RateLimiter(10, 20)
+    assert limiter.allow()  # Should allow a request
+    limiter.bucket.tokens = 0  # Simulate no tokens left
+    assert not limiter.allow()  # Should not allow a request
+
+def test_rate_limiter_get_rate():
+    """Tests the get_rate method of the RateLimiter."""
+    limiter = RateLimiter(10, 20)
+    assert limiter.get_rate() == 10
+
+def test_rate_limiter_get_burst():
+    """Tests the get_burst method of the RateLimiter."""
+    limiter = RateLimiter(10, 20)
+    assert limiter.get_burst() == 20
+
+def test_rate_limiter_decorator_init():
+    """Tests the RateLimiterDecorator initialization."""
+    limiter = RateLimiter(10, 20)
+    decorator = RateLimiterDecorator(limiter)
+    assert decorator.limiter == limiter
+
+def test_rate_limiter_decorator_call():
+    """Tests the __call__ method of the RateLimiterDecorator."""
+    limiter = RateLimiter(10, 20)
+    decorator = RateLimiterDecorator(limiter)
+
+    @decorator
+    def my_function():
+        return "Hello, world!"
+
+    assert my_function() == "Hello, world!"  # Should allow the function call
+    limiter.bucket.tokens = 0  # Simulate no tokens left
+    with pytest.raises(Exception):
+        my_function()  # Should raise an exception
+
+def test_rate_limiter_decorator_get():
+    """Tests the __get__ method of the RateLimiterDecorator."""
+    limiter = RateLimiter(10, 20)
+    decorator = RateLimiterDecorator(limiter)
+    instance = object()
+    assert decorator.__get__(instance, type(instance)) == decorator
+
+def test_rate_limiter_factory_init():
+    """Tests the RateLimiterFactory initialization."""
+    factory = RateLimiterFactory()
+    assert hasattr(factory, 'limiters')
+    assert hasattr(factory, 'lock')
+
+def test_rate_limiter_factory_get_limiter():
+    """Tests the get_limiter method of the RateLimiterFactory."""
+    factory = RateLimiterFactory()
+    limiter = factory.create_limiter("my_limiter", 10, 20)
+    assert factory.get_limiter("my_limiter") == limiter
+
+def test_rate_limiter_factory_create_limiter():
+    """Tests the create_limiter method of the RateLimiterFactory."""
+    factory = RateLimiterFactory()
+    limiter = factory.create_limiter("my_limiter", 10, 20)
+    assert limiter.bucket.rate == 10
+    assert limiter.bucket.burst == 20
+    with pytest.raises(Exception):
+        factory.create_limiter("my_limiter", 10, 20)  # Should raise an exception
+
+def test_rate_limiter_factory_delete_limiter():
+    """Tests the delete_limiter method of the RateLimiterFactory."""
+    factory = RateLimiterFactory()
+    limiter = factory.create_limiter("my_limiter", 10, 20)
+    factory.delete_limiter("my_limiter")
+    with pytest.raises(Exception):
+        factory.delete_limiter("my_limiter")  # Should raise an exception
+
+def test_thread_safety():
+    """Tests the thread safety of the rate limiter."""
+    import threading
+
+    limiter = RateLimiter(10, 20)
+    decorator = RateLimiterDecorator(limiter)
+
+    def test_function():
+        @decorator
+        def my_function():
+            pass
+        for _ in range(100):
+            my_function()
+
+    threads = []
+    for _ in range(10):
+        thread = threading.Thread(target=test_function)
+        thread.start()
+        threads.append(thread)
+
+    for thread in threads:
+        thread.join()
+
+    assert limiter.bucket.tokens >= 0  # Should not go below 0
+
+def test_rate_limiter_decorator_with_instance():
+    """Tests the RateLimiterDecorator with an instance."""
+    class MyClass:
+        def __init__(self, limiter):
+            self.limiter = limiter
+
+        @RateLimiterDecorator(None)
+        def my_method(self):
+            return "Hello, world!"
+
+    limiter = RateLimiter(10, 20)
+    instance = MyClass(limiter)
+    instance.my_method.limiter = limiter
+    assert instance.my_method() == "Hello, world!"  # Should allow the method call
+    limiter.bucket.tokens = 0  # Simulate no tokens left
+    with pytest.raises(Exception):
+        instance.my_method()  # Should raise an exception
+```
+
+These tests cover various aspects of the rate limiter module, including initialization, token bucket management, rate limiting, decorator application, and thread safety. The `test_rate_limiter_decorator_with_instance` test case is added to ensure that the `RateLimiterDecorator` works correctly when used with an instance method.
+
+################################################################################
+# ROUND 3
+################################################################################
+
+------------------------------------------------------------
+Architect (round 3)
+Tokens: 3855 in / 2048 out | 3.598s
+------------------------------------------------------------
+**Architecture Document: Rate Limiter Module**
+=============================================
+
+### Overview
+
+The rate limiter module is designed to implement a token bucket algorithm for rate limiting. It supports configurable rate and burst size, multiple named rate limiters, and thread-safe operation. The module provides a decorator for easy application to functions.
+
+### Module Structure
+
+The module consists of the following components:
+
+*   `RateLimiter`: The main class responsible for managing the rate limiting logic.
+*   `TokenBucket`: A class that implements the token bucket algorithm.
+*   `RateLimiterDecorator`: A decorator that applies rate limiting to functions.
+*   `RateLimiterFactory`: A factory class that creates and manages named rate limiters.
+
+### Class Diagram
+
+```markdown
++---------------+
+|  RateLimiter  |
++---------------+
+|  - bucket: TokenBucket  |
+|  + __init__(rate, burst)  |
+|  + allow()                |
+|  + get_rate()             |
+|  + get_burst()            |
+|  + get_tokens()           |
++---------------+
+       |
+       |
+       v
++---------------+
+| TokenBucket    |
++---------------+
+|  - tokens: int       |
+|  - last_update: float |
+|  + __init__(rate, burst) |
+|  + add_tokens()         |
+|  + consume_token()      |
+|  + get_tokens()         |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterDecorator |
++---------------+
+|  - limiter: RateLimiter |
+|  + __call__(func)        |
+|  + __get__(instance, owner) |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterFactory  |
++---------------+
+|  - limiters: dict     |
+|  + get_limiter(name)  |
+|  + create_limiter(name, rate, burst) |
+|  + delete_limiter(name)          |
+|  + update_limiter(name, rate, burst) |
++---------------+
+```
+
+### Sequence Diagram
+
+```markdown
++---------------+
+|  Client      |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterDecorator |
++---------------+
+       |
+       |
+       v
++---------------+
+|  RateLimiter    |
++---------------+
+       |
+       |
+       v
++---------------+
+| TokenBucket    |
++---------------+
+```
+
+### Implementation
+
+```python
+import threading
+import time
+from functools import wraps
+
+class TokenBucket:
+    """Implements the token bucket algorithm."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the token bucket.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.rate = rate
+        self.burst = burst
+        self.tokens = burst
+        self.last_update = time.time()
+
+    def add_tokens(self):
+        """Adds tokens to the bucket based on the elapsed time."""
+        now = time.time()
+        elapsed = now - self.last_update
+        self.last_update = now
+        self.tokens = min(self.burst, self.tokens + elapsed * self.rate)
+
+    def consume_token(self):
+        """Consumes a token from the bucket."""
+        self.add_tokens()
+        if self.tokens < 1:
+            return False
+        self.tokens -= 1
+        return True
+
+    def get_tokens(self):
+        """Returns the current number of tokens in the bucket."""
+        self.add_tokens()
+        return self.tokens
+
+
+class RateLimiter:
+    """Manages the rate limiting logic."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the rate limiter.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.bucket = TokenBucket(rate, burst)
+        self.lock = threading.Lock()
+
+    def allow(self):
+        """Checks if a request is allowed."""
+        with self.lock:
+            return self.bucket.consume_token()
+
+    def get_rate(self):
+        """Returns the rate at which tokens are added."""
+        return self.bucket.rate
+
+    def get_burst(self):
+        """Returns the maximum number of tokens in the bucket."""
+        return self.bucket.burst
+
+    def get_tokens(self):
+        """Returns the current number of tokens in the bucket."""
+        with self.lock:
+            return self.bucket.get_tokens()
+
+
+class RateLimiterDecorator:
+    """A decorator that applies rate limiting to functions."""
+
+    def __init__(self, limiter):
+        """
+        Initializes the decorator.
+
+        :param limiter: The rate limiter instance.
+        """
+        self.limiter = limiter
+
+    def __call__(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not self.limiter.allow():
+                raise Exception("Rate limit exceeded")
+            return func(*args, **kwargs)
+        return wrapper
+
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+        return RateLimiterDecorator(self.limiter)
+
+
+class RateLimiterFactory:
+    """A factory class that creates and manages named rate limiters."""
+
+    def __init__(self):
+        self.limiters = {}
+        self.lock = threading.Lock()
+
+    def get_limiter(self, name):
+        """
+        Retrieves a named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :return: The rate limiter instance.
+        """
+        with self.lock:
+            return self.limiters.get(name)
+
+    def create_limiter(self, name, rate, burst):
+        """
+        Creates a new named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        :return: The rate limiter instance.
+        """
+        with self.lock:
+            if name in self.limiters:
+                raise Exception("Rate limiter already exists")
+            limiter = RateLimiter(rate, burst)
+            self.limiters[name] = limiter
+            return limiter
+
+    def delete_limiter(self, name):
+        """
+        Deletes a named rate limiter.
+
+        :param name: The name of the rate limiter.
+        """
+        with self.lock:
+            if name not in self.limiters:
+                raise Exception("Rate limiter does not exist")
+            del self.limiters[name]
+
+    def update_limiter(self, name, rate, burst):
+        """
+        Updates a named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :param rate: The new rate at which tokens are added (requests per second).
+        :param burst: The new maximum number of tokens in the bucket.
+        """
+        with self.lock:
+            if name not in self.limiters:
+                raise Exception("Rate limiter does not exist")
+            self.limiters[name].bucket.rate = rate
+            self.limiters[name].bucket.burst = burst
+
+
+# Example usage:
+factory = RateLimiterFactory()
+limiter = factory.create_limiter("my_limiter", 10, 20)
+decorator = RateLimiterDecorator(limiter)
+
+@decorator
+def my_function():
+    print("Hello, world!")
+
+my_function()
+```
+
+### Unit Tests
+
+```python
+import unittest
+from rate_limiter import RateLimiter, TokenBucket, RateLimiterDecorator, RateLimiterFactory
+
+class TestRateLimiter(unittest.TestCase):
+    def test_rate_limiter(self):
+        limiter = RateLimiter(10, 20)
+        self.assertTrue(limiter.allow())
+        self.assertTrue(limiter.allow())
+        time.sleep(0.1)
+        self.assertTrue(limiter.allow())
+
+    def test_token_bucket(self):
+        bucket = TokenBucket(10, 20)
+        self.assertTrue(bucket.consume_token())
+        self.assertTrue(bucket.consume_token())
+        time.sleep(0.1)
+        self.assertTrue(bucket.consume_token())
+
+    def test_rate_limiter_decorator(self):
+        limiter = RateLimiter(10, 20)
+        decorator = RateLimiterDecorator(limiter)
+
+        @decorator
+        def my_function():
+            pass
+
+        my_function()
+        my_function()
+        time.sleep(0.1)
+        my_function()
+
+    def test_rate_limiter_factory(self):
+        factory = RateLimiterFactory()
+        limiter = factory.create_limiter("my_limiter", 10, 20)
+        self.assertIsNotNone(limiter)
+        self.assertIsInstance(limiter, RateLimiter)
+
+    def test_rate_limiter_get_rate(self):
+        limiter = RateLimiter(10, 20)
+        self.assertEqual(limiter.get_rate(), 10)
+
+    def test_rate_limiter_get_burst(self):
+        limiter = RateLimiter(10, 20)
+        self.assertEqual(limiter.get_burst(), 20)
+
+    def test_token_bucket_get_tokens(self):
+        bucket = TokenBucket(10, 20)
+        self.assertEqual(bucket.get_tokens(), 20)
+
+    def test_rate_limiter_get_tokens(self):
+        limiter = RateLimiter(10, 20)
+        self.assertEqual(limiter.get_tokens(), 20)
+
+    def test_rate_limiter_factory_update_limiter(self):
+        factory = RateLimiterFactory()
+        limiter = factory.create_limiter("my_limiter", 10, 20)
+        factory.update_limiter("my_limiter", 15, 25)
+        self.assertEqual(limiter.get_rate(), 15)
+        self.assertEqual(limiter.get_burst(), 25)
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+### Code Review
+
+The code has been improved with the following changes:
+
+*   Added `update_limiter` method to the `Rate
+
+------------------------------------------------------------
+Coder (round 3)
+Tokens: 7578 in / 1055 out | 2.298s
+------------------------------------------------------------
+```python
+import threading
+import time
+from functools import wraps
+
+class TokenBucket:
+    """Implements the token bucket algorithm."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the token bucket.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.rate = rate
+        self.burst = burst
+        self.tokens = burst
+        self.last_update = time.time()
+
+    def add_tokens(self):
+        """Adds tokens to the bucket based on the elapsed time."""
+        now = time.time()
+        elapsed = now - self.last_update
+        self.last_update = now
+        self.tokens = min(self.burst, self.tokens + elapsed * self.rate)
+
+    def consume_token(self):
+        """Consumes a token from the bucket."""
+        self.add_tokens()
+        if self.tokens < 1:
+            return False
+        self.tokens -= 1
+        return True
+
+    def get_tokens(self):
+        """Returns the current number of tokens in the bucket."""
+        self.add_tokens()
+        return self.tokens
+
+
+class RateLimiter:
+    """Manages the rate limiting logic."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the rate limiter.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.bucket = TokenBucket(rate, burst)
+        self.lock = threading.Lock()
+
+    def allow(self):
+        """Checks if a request is allowed."""
+        with self.lock:
+            return self.bucket.consume_token()
+
+    def get_rate(self):
+        """Returns the rate at which tokens are added."""
+        return self.bucket.rate
+
+    def get_burst(self):
+        """Returns the maximum number of tokens in the bucket."""
+        return self.bucket.burst
+
+    def get_tokens(self):
+        """Returns the current number of tokens in the bucket."""
+        with self.lock:
+            return self.bucket.get_tokens()
+
+
+class RateLimiterDecorator:
+    """A decorator that applies rate limiting to functions."""
+
+    def __init__(self, limiter):
+        """
+        Initializes the decorator.
+
+        :param limiter: The rate limiter instance.
+        """
+        self.limiter = limiter
+
+    def __call__(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not self.limiter.allow():
+                raise Exception("Rate limit exceeded")
+            return func(*args, **kwargs)
+        return wrapper
+
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+        return RateLimiterDecorator(self.limiter)
+
+
+class RateLimiterFactory:
+    """A factory class that creates and manages named rate limiters."""
+
+    def __init__(self):
+        self.limiters = {}
+        self.lock = threading.Lock()
+
+    def get_limiter(self, name):
+        """
+        Retrieves a named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :return: The rate limiter instance.
+        """
+        with self.lock:
+            return self.limiters.get(name)
+
+    def create_limiter(self, name, rate, burst):
+        """
+        Creates a new named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        :return: The rate limiter instance.
+        """
+        with self.lock:
+            if name in self.limiters:
+                raise Exception("Rate limiter already exists")
+            limiter = RateLimiter(rate, burst)
+            self.limiters[name] = limiter
+            return limiter
+
+    def delete_limiter(self, name):
+        """
+        Deletes a named rate limiter.
+
+        :param name: The name of the rate limiter.
+        """
+        with self.lock:
+            if name not in self.limiters:
+                raise Exception("Rate limiter does not exist")
+            del self.limiters[name]
+
+    def update_limiter(self, name, rate, burst):
+        """
+        Updates a named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :param rate: The new rate at which tokens are added (requests per second).
+        :param burst: The new maximum number of tokens in the bucket.
+        """
+        with self.lock:
+            if name not in self.limiters:
+                raise Exception("Rate limiter does not exist")
+            self.limiters[name].bucket.rate = rate
+            self.limiters[name].bucket.burst = burst
+
+
+def main():
+    # Example usage:
+    factory = RateLimiterFactory()
+    limiter = factory.create_limiter("my_limiter", 10, 20)
+    decorator = RateLimiterDecorator(limiter)
+
+    @decorator
+    def my_function():
+        print("Hello, world!")
+
+    my_function()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+------------------------------------------------------------
+Reviewer (round 3)
+Tokens: 16747 in / 2048 out | 6.383s
+------------------------------------------------------------
+### Reviewer Output
+#### Code Review
+
+The provided code is well-structured and follows best practices. The use of classes and decorators makes the code maintainable and easy to understand.
+
+Here are some specific observations and suggestions:
+
+1.  **Token Bucket Algorithm**: The token bucket algorithm is implemented correctly in the `TokenBucket` class. However, it might be beneficial to add more methods for token management, such as `reset_tokens()` to reset the tokens to the burst size.
+2.  **Rate Limiter**: The `RateLimiter` class is well-implemented, and the use of a lock ensures thread safety. Consider adding more methods for configuration and monitoring, such as `get_rate()` and `get_burst()` to retrieve the current rate and burst size.
+3.  **Rate Limiter Decorator**: The `RateLimiterDecorator` class is straightforward and effectively applies rate limiting to functions. You might want to add more functionality, such as the ability to specify a custom exception message or a fallback function to call when the rate limit is exceeded.
+4.  **Rate Limiter Factory**: The `RateLimiterFactory` class is a good implementation of the factory pattern. Consider adding more methods for managing named rate limiters, such as `delete_limiter()` to remove a limiter or `list_limiters()` to retrieve a list of all created limiters.
+5.  **Unit Tests**: The provided unit tests cover various aspects of the rate limiter module. However, it would be beneficial to add more test cases for edge scenarios, such as testing the rate limiter with a burst size of 0 or a rate of 0.
+
+#### Suggestions for Improvement
+
+1.  **Add More Methods for Token Management**: Consider adding more methods to the `TokenBucket` class for token management, such as `reset_tokens()`.
+2.  **Improve Rate Limiter Configuration**: Add more methods to the `RateLimiter` class for configuration and monitoring, such as `get_rate()` and `get_burst()`.
+3.  **Enhance Rate Limiter Decorator**: Add more functionality to the `RateLimiterDecorator` class, such as the ability to specify a custom exception message or a fallback function.
+4.  **Expand Rate Limiter Factory**: Add more methods to the `RateLimiterFactory` class for managing named rate limiters, such as `delete_limiter()` or `list_limiters()`.
+5.  **Increase Unit Test Coverage**: Add more test cases for edge scenarios to ensure the rate limiter module is robust and reliable.
+
+#### Code Quality and Best Practices
+
+The code adheres to best practices, including:
+
+*   **Clear and Consistent Naming**: The code uses clear and consistent naming conventions throughout.
+*   **Proper Use of Comments**: The code includes proper comments to explain the purpose and behavior of each class and method.
+*   **Error Handling**: The code handles errors and exceptions properly, ensuring the program remains stable in case of unexpected events.
+*   **Thread Safety**: The code ensures thread safety by using locks to prevent concurrent access to shared resources.
+
+However, there are a few areas for improvement:
+
+*   **Type Hints**: Consider adding type hints to method parameters and return types to improve code readability and facilitate static type checking.
+*   **Docstrings**: While the code includes comments, consider adding docstrings to provide a more detailed description of each class and method.
+*   **Testing**: While the code includes unit tests, consider adding more test cases to ensure the rate limiter module is thoroughly tested.
+
+#### Conclusion
+
+The provided code is well-structured, readable, and follows best practices. With a few suggestions for improvement, the code can become even more robust, maintainable, and reliable. By addressing the areas mentioned above, the rate limiter module can be further enhanced to provide a more comprehensive and efficient solution for managing rate limits in various applications.
+
+### Architecture Document Update
+
+Based on the provided input, the architecture document can be updated to reflect the suggestions and improvements mentioned above.
+
+```markdown
+### Overview
+
+The rate limiter module is designed to implement a token bucket algorithm for rate limiting. It supports configurable rate and burst size, multiple named rate limiters, and thread-safe operation. The module provides a decorator for easy application to functions.
+
+### Module Structure
+
+The module consists of the following components:
+
+*   `RateLimiter`: The main class responsible for managing the rate limiting logic.
+*   `TokenBucket`: A class that implements the token bucket algorithm.
+*   `RateLimiterDecorator`: A decorator that applies rate limiting to functions.
+*   `RateLimiterFactory`: A factory class that creates and manages named rate limiters.
+
+### Class Diagram
+
+```markdown
++---------------+
+|  RateLimiter  |
++---------------+
+|  - bucket: TokenBucket  |
+|  + __init__(rate, burst)  |
+|  + allow()                |
+|  + get_rate()             |
+|  + get_burst()            |
+|  + get_tokens()           |
++---------------+
+       |
+       |
+       v
++---------------+
+| TokenBucket    |
++---------------+
+|  - tokens: int       |
+|  - last_update: float |
+|  + __init__(rate, burst) |
+|  + add_tokens()         |
+|  + consume_token()      |
+|  + get_tokens()         |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterDecorator |
++---------------+
+|  - limiter: RateLimiter |
+|  + __call__(func)        |
+|  + __get__(instance, owner) |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterFactory  |
++---------------+
+|  - limiters: dict     |
+|  + get_limiter(name)  |
+|  + create_limiter(name, rate, burst) |
+|  + delete_limiter(name)          |
+|  + update_limiter(name, rate, burst) |
++---------------+
+```
+
+### Sequence Diagram
+
+```markdown
++---------------+
+|  Client      |
++---------------+
+       |
+       |
+       v
++---------------+
+| RateLimiterDecorator |
++---------------+
+       |
+       |
+       v
++---------------+
+|  RateLimiter    |
++---------------+
+       |
+       |
+       v
++---------------+
+| TokenBucket    |
++---------------+
+```
+
+### Implementation
+
+The implementation of the rate limiter module is updated to reflect the suggestions and improvements mentioned above.
+
+```python
+import threading
+import time
+from functools import wraps
+
+class TokenBucket:
+    """Implements the token bucket algorithm."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the token bucket.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.rate = rate
+        self.burst = burst
+        self.tokens = burst
+        self.last_update = time.time()
+
+    def add_tokens(self):
+        """Adds tokens to the bucket based on the elapsed time."""
+        now = time.time()
+        elapsed = now - self.last_update
+        self.last_update = now
+        self.tokens = min(self.burst, self.tokens + elapsed * self.rate)
+
+    def consume_token(self):
+        """Consumes a token from the bucket."""
+        self.add_tokens()
+        if self.tokens < 1:
+            return False
+        self.tokens -= 1
+        return True
+
+    def get_tokens(self):
+        """Returns the current number of tokens in the bucket."""
+        self.add_tokens()
+        return self.tokens
+
+    def reset_tokens(self):
+        """Resets the tokens to the burst size."""
+        self.tokens = self.burst
+
+
+class RateLimiter:
+    """Manages the rate limiting logic."""
+
+    def __init__(self, rate, burst):
+        """
+        Initializes the rate limiter.
+
+        :param rate: The rate at which tokens are added (requests per second).
+        :param burst: The maximum number of tokens in the bucket.
+        """
+        self.bucket = TokenBucket(rate, burst)
+        self.lock = threading.Lock()
+
+    def allow(self):
+        """Checks if a request is allowed."""
+        with self.lock:
+            return self.bucket.consume_token()
+
+    def get_rate(self):
+        """Returns the rate at which tokens are added."""
+        return self.bucket.rate
+
+    def get_burst(self):
+        """Returns the maximum number of tokens in the bucket."""
+        return self.bucket.burst
+
+    def get_tokens(self):
+        """Returns the current number of tokens in the bucket."""
+        with self.lock:
+            return self.bucket.get_tokens()
+
+
+class RateLimiterDecorator:
+    """A decorator that applies rate limiting to functions."""
+
+    def __init__(self, limiter):
+        """
+        Initializes the decorator.
+
+        :param limiter: The rate limiter instance.
+        """
+        self.limiter = limiter
+
+    def __call__(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not self.limiter.allow():
+                raise Exception("Rate limit exceeded")
+            return func(*args, **kwargs)
+        return wrapper
+
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+        return RateLimiterDecorator(self.limiter)
+
+
+class RateLimiterFactory:
+    """A factory class that creates and manages named rate limiters."""
+
+    def __init__(self):
+        self.limiters = {}
+        self.lock = threading.Lock()
+
+    def get_limiter(self, name):
+        """
+        Retrieves a named rate limiter.
+
+        :param name: The name of the rate limiter.
+        :return: The rate limiter instance.
+        """
+        with self.lock:
+            return self.limiters.get(name)
+
+    def create_limiter(self, name, rate, burst):
+        """
+        Creates a new named
+
+------------------------------------------------------------
+Tester (round 3)
+Tokens: 5367 in / 1651 out | 3.3s
+------------------------------------------------------------
+### Unit Tests for Rate Limiter Module
+
+The following tests ensure the correctness of the rate limiter module, including the token bucket algorithm, rate limiter, and decorator.
+
+```python
+import pytest
+import time
+from solution import TokenBucket, RateLimiter, RateLimiterDecorator, RateLimiterFactory
+
+def test_token_bucket_init():
+    """Tests the TokenBucket initialization."""
+    bucket = TokenBucket(10, 20)
+    assert bucket.rate == 10
+    assert bucket.burst == 20
+    assert bucket.tokens == 20
+    assert bucket.last_update is not None
+
+def test_token_bucket_add_tokens():
+    """Tests the add_tokens method of the TokenBucket."""
+    bucket = TokenBucket(10, 20)
+    bucket.last_update = time.time() - 1  # Simulate 1 second elapsed
+    bucket.add_tokens()
+    assert bucket.tokens == 21
+
+def test_token_bucket_consume_token():
+    """Tests the consume_token method of the TokenBucket."""
+    bucket = TokenBucket(10, 20)
+    assert bucket.consume_token()  # Should consume a token
+    assert bucket.tokens == 19
+    bucket.tokens = 0  # Simulate no tokens left
+    assert not bucket.consume_token()  # Should not consume a token
+
+def test_token_bucket_get_tokens():
+    """Tests the get_tokens method of the TokenBucket."""
+    bucket = TokenBucket(10, 20)
+    bucket.last_update = time.time() - 1  # Simulate 1 second elapsed
+    assert bucket.get_tokens() == 21
+
+def test_rate_limiter_init():
+    """Tests the RateLimiter initialization."""
+    limiter = RateLimiter(10, 20)
+    assert limiter.bucket.rate == 10
+    assert limiter.bucket.burst == 20
+    assert hasattr(limiter, 'lock')
+
+def test_rate_limiter_allow():
+    """Tests the allow method of the RateLimiter."""
+    limiter = RateLimiter(10, 20)
+    assert limiter.allow()  # Should allow a request
+    limiter.bucket.tokens = 0  # Simulate no tokens left
+    assert not limiter.allow()  # Should not allow a request
+
+def test_rate_limiter_get_rate():
+    """Tests the get_rate method of the RateLimiter."""
+    limiter = RateLimiter(10, 20)
+    assert limiter.get_rate() == 10
+
+def test_rate_limiter_get_burst():
+    """Tests the get_burst method of the RateLimiter."""
+    limiter = RateLimiter(10, 20)
+    assert limiter.get_burst() == 20
+
+def test_rate_limiter_get_tokens():
+    """Tests the get_tokens method of the RateLimiter."""
+    limiter = RateLimiter(10, 20)
+    limiter.bucket.last_update = time.time() - 1  # Simulate 1 second elapsed
+    assert limiter.get_tokens() == 21
+
+def test_rate_limiter_decorator_init():
+    """Tests the RateLimiterDecorator initialization."""
+    limiter = RateLimiter(10, 20)
+    decorator = RateLimiterDecorator(limiter)
+    assert decorator.limiter == limiter
+
+def test_rate_limiter_decorator_call():
+    """Tests the __call__ method of the RateLimiterDecorator."""
+    limiter = RateLimiter(10, 20)
+    decorator = RateLimiterDecorator(limiter)
+
+    @decorator
+    def my_function():
+        return "Hello, world!"
+
+    assert my_function() == "Hello, world!"  # Should allow the function call
+    limiter.bucket.tokens = 0  # Simulate no tokens left
+    with pytest.raises(Exception):
+        my_function()  # Should raise an exception
+
+def test_rate_limiter_decorator_get():
+    """Tests the __get__ method of the RateLimiterDecorator."""
+    limiter = RateLimiter(10, 20)
+    decorator = RateLimiterDecorator(limiter)
+    instance = object()
+    assert decorator.__get__(instance, type(instance)) == decorator
+
+def test_rate_limiter_factory_init():
+    """Tests the RateLimiterFactory initialization."""
+    factory = RateLimiterFactory()
+    assert hasattr(factory, 'limiters')
+    assert hasattr(factory, 'lock')
+
+def test_rate_limiter_factory_get_limiter():
+    """Tests the get_limiter method of the RateLimiterFactory."""
+    factory = RateLimiterFactory()
+    limiter = factory.create_limiter("my_limiter", 10, 20)
+    assert factory.get_limiter("my_limiter") == limiter
+
+def test_rate_limiter_factory_create_limiter():
+    """Tests the create_limiter method of the RateLimiterFactory."""
+    factory = RateLimiterFactory()
+    limiter = factory.create_limiter("my_limiter", 10, 20)
+    assert limiter.bucket.rate == 10
+    assert limiter.bucket.burst == 20
+    with pytest.raises(Exception):
+        factory.create_limiter("my_limiter", 10, 20)  # Should raise an exception
+
+def test_rate_limiter_factory_delete_limiter():
+    """Tests the delete_limiter method of the RateLimiterFactory."""
+    factory = RateLimiterFactory()
+    limiter = factory.create_limiter("my_limiter", 10, 20)
+    factory.delete_limiter("my_limiter")
+    with pytest.raises(Exception):
+        factory.delete_limiter("my_limiter")  # Should raise an exception
+
+def test_rate_limiter_factory_update_limiter():
+    """Tests the update_limiter method of the RateLimiterFactory."""
+    factory = RateLimiterFactory()
+    limiter = factory.create_limiter("my_limiter", 10, 20)
+    factory.update_limiter("my_limiter", 15, 25)
+    assert limiter.bucket.rate == 15
+    assert limiter.bucket.burst == 25
+    with pytest.raises(Exception):
+        factory.update_limiter("non_existent_limiter", 15, 25)  # Should raise an exception
+
+def test_thread_safety():
+    """Tests the thread safety of the rate limiter."""
+    import threading
+
+    limiter = RateLimiter(10, 20)
+    decorator = RateLimiterDecorator(limiter)
+
+    def test_function():
+        @decorator
+        def my_function():
+            pass
+        for _ in range(100):
+            my_function()
+
+    threads = []
+    for _ in range(10):
+        thread = threading.Thread(target=test_function)
+        thread.start()
+        threads.append(thread)
+
+    for thread in threads:
+        thread.join()
+
+    assert limiter.bucket.tokens >= 0  # Should not go below 0
+
+def test_rate_limiter_decorator_with_instance():
+    """Tests the RateLimiterDecorator with an instance."""
+    class MyClass:
+        def __init__(self, limiter):
+            self.limiter = limiter
+
+        @RateLimiterDecorator(None)
+        def my_method(self):
+            return "Hello, world!"
+
+    limiter = RateLimiter(10, 20)
+    instance = MyClass(limiter)
+    instance.my_method.limiter = limiter
+    assert instance.my_method() == "Hello, world!"  # Should allow the method call
+    limiter.bucket.tokens = 0  # Simulate no tokens left
+    with pytest.raises(Exception):
+        instance.my_method()  # Should raise an exception
+```
+
+These tests cover various aspects of the rate limiter module, including initialization, token bucket management, rate limiting, decorator application, and thread safety. The `test_rate_limiter_decorator_with_instance` test case is added to ensure that the `RateLimiterDecorator` works correctly when used with an instance method. The `test_rate_limiter_factory_update_limiter` test case is added to ensure that the `update_limiter` method of the `RateLimiterFactory` works correctly.

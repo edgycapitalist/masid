@@ -1,6 +1,5 @@
 """Tests for masid.evaluation."""
 
-import pytest
 
 from masid.agents import AgentOutput
 from masid.evaluation import compute_duplication_rate, compute_efficiency_metrics

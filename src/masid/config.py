@@ -7,11 +7,9 @@ and merges overrides from CLI flags.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import yaml
 from pydantic import BaseModel, Field
-
 
 # ---------------------------------------------------------------------------
 # Sub-models
@@ -33,7 +31,7 @@ class ExperimentConfig(BaseModel):
 
     trials_per_cell: int = 12
     max_rounds: int = 3
-    seed: Optional[int] = 42
+    seed: int | None = 42
 
 
 class EvaluationConfig(BaseModel):
@@ -41,7 +39,7 @@ class EvaluationConfig(BaseModel):
 
     judge_model: str = "llama3.1:8b"
     judge_provider: str = "ollama"
-    judge_base_url: Optional[str] = None
+    judge_base_url: str | None = None
     spot_check_pct: float = 0.10
 
 
@@ -63,7 +61,7 @@ class LoggingConfig(BaseModel):
     """Logging settings."""
 
     level: str = "INFO"
-    file: Optional[str] = None
+    file: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -103,8 +101,8 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def load_config(
-    config_path: Optional[str | Path] = None,
-    overrides: Optional[dict] = None,
+    config_path: str | Path | None = None,
+    overrides: dict | None = None,
 ) -> MASIDConfig:
     """Load and validate a MASID configuration.
 

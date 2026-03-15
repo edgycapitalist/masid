@@ -1,6 +1,5 @@
 """Tests for masid.orchestrator (TrialRunner)."""
 
-import pytest
 
 from masid.config import MASIDConfig
 from masid.domains.registry import get_tasks

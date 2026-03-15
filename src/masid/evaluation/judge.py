@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Optional
 
 from masid.models import LLMClient
 
@@ -142,7 +141,7 @@ def judge_trial_output(
     client: LLMClient,
     task_description: str,
     combined_output: str,
-    expected_hint: Optional[str] = None,
+    expected_hint: str | None = None,
     domain: str = "software_dev",
     max_retries: int = 2,
 ) -> dict:

@@ -3,12 +3,11 @@
 import pytest
 
 from masid.agents.roles import get_roles
-from masid.architectures.registry import get_architecture
+from masid.architectures.iamd import IAMDArchitecture
 from masid.architectures.irm import IRMArchitecture
 from masid.architectures.jro import JROArchitecture
-from masid.architectures.iamd import IAMDArchitecture
+from masid.architectures.registry import get_architecture
 from masid.domains import TaskSpec
-
 
 TASK_DESC = "Build a URL shortener library."
 TASK = TaskSpec(

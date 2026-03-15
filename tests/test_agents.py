@@ -2,8 +2,8 @@
 
 import pytest
 
-from masid.agents import Agent, AgentMessage, AgentOutput
-from masid.agents.roles import get_roles, DOMAIN_ROLES
+from masid.agents import Agent, AgentOutput
+from masid.agents.roles import DOMAIN_ROLES, get_roles
 
 
 class TestAgent:

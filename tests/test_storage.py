@@ -1,8 +1,6 @@
 """Tests for masid.storage."""
 
-import pytest
 
-from masid.storage import ExperimentDB
 
 
 class TestExperimentDB:

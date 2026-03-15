@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Generator, Optional
-
+from typing import Any, Optional
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS trials (
@@ -114,10 +114,10 @@ class ExperimentDB:
         coordination: dict[str, float],
         agent_scores: dict[str, float],
         judge_rationale: str = "",
-        fault_type: Optional[str] = None,
-        fault_agent: Optional[str] = None,
-        seed: Optional[int] = None,
-        metadata: Optional[dict] = None,
+        fault_type: str | None = None,
+        fault_agent: str | None = None,
+        seed: int | None = None,
+        metadata: dict | None = None,
     ) -> None:
         """Save a complete trial record."""
         with self._connect() as conn:
@@ -190,9 +190,9 @@ class ExperimentDB:
 
     def get_trials_by(
         self,
-        architecture: Optional[str] = None,
-        domain: Optional[str] = None,
-        model: Optional[str] = None,
+        architecture: str | None = None,
+        domain: str | None = None,
+        model: str | None = None,
     ) -> list[dict]:
         """Query trials with optional filters."""
         query = "SELECT * FROM trials WHERE 1=1"

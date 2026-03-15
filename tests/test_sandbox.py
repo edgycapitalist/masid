@@ -1,16 +1,14 @@
 """Tests for masid.evaluation.sandbox."""
 
-import pytest
 
 from masid.evaluation.sandbox import (
-    ExecutionResult,
-    check_syntax,
-    extract_code_blocks,
-    evaluate_agent_code,
-    run_code,
-    run_tests,
     _compute_execution_score,
     _parse_pytest_output,
+    check_syntax,
+    evaluate_agent_code,
+    extract_code_blocks,
+    run_code,
+    run_tests,
 )
 
 

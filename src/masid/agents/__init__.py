@@ -58,7 +58,7 @@ class Agent:
         role: str,
         system_prompt: str,
         client: LLMClient,
-        evaluation_criteria: Optional[dict[str, float]] = None,
+        evaluation_criteria: dict[str, float] | None = None,
     ) -> None:
         self.agent_id = agent_id
         self.role = role

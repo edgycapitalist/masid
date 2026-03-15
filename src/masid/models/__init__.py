@@ -38,7 +38,7 @@ class LLMResponse:
     completion_tokens: int
     total_tokens: int
     latency_seconds: float
-    raw: Optional[dict] = field(default=None, repr=False)
+    raw: dict | None = field(default=None, repr=False)
 
 
 def _strip_think_blocks(text: str) -> str:
@@ -80,7 +80,7 @@ class LLMClient:
         self,
         provider: str = "ollama",
         model_name: str = "llama3.1:8b",
-        base_url: Optional[str] = "http://localhost:11434",
+        base_url: str | None = "http://localhost:11434",
         temperature: float = 0.7,
         max_tokens: int = 2048,
         timeout: int = 120,
@@ -107,8 +107,8 @@ class LLMClient:
     def chat(
         self,
         messages: list[dict[str, str]],
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse:
         """Send a chat-completion request and return a structured response.
 

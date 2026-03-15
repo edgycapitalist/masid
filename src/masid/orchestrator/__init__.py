@@ -14,15 +14,15 @@ import uuid
 from typing import Optional
 
 from masid.agents import AgentOutput
+from masid.agents.roles import get_roles
 from masid.architectures import BaseArchitecture
 from masid.architectures.registry import get_architecture
-from masid.agents.roles import get_roles
 from masid.config import MASIDConfig
 from masid.domains import TaskSpec
 from masid.domains.registry import get_tasks
 from masid.evaluation import TrialMetrics, compute_duplication_rate, compute_efficiency_metrics
 from masid.evaluation.judge import judge_trial_output
-from masid.evaluation.sandbox import evaluate_agent_code, ExecutionResult
+from masid.evaluation.sandbox import ExecutionResult, evaluate_agent_code
 from masid.models import LLMClient
 from masid.storage import ExperimentDB
 
@@ -44,7 +44,7 @@ class TrialRunner:
     def __init__(
         self,
         config: MASIDConfig,
-        db: Optional[ExperimentDB] = None,
+        db: ExperimentDB | None = None,
     ) -> None:
         self.config = config
         self.db = db
@@ -54,10 +54,10 @@ class TrialRunner:
         architecture_key: str,
         domain: str,
         task: TaskSpec,
-        model_name: Optional[str] = None,
-        seed: Optional[int] = None,
-        fault_type: Optional[str] = None,
-        fault_agent_role: Optional[str] = None,
+        model_name: str | None = None,
+        seed: int | None = None,
+        fault_type: str | None = None,
+        fault_agent_role: str | None = None,
     ) -> TrialMetrics:
         """Execute a single trial and return metrics.
 
@@ -116,7 +116,7 @@ class TrialRunner:
         # 5. Run rounds
         all_round_outputs: list[list[AgentOutput]] = []
         previous_outputs: list[AgentOutput] = []
-        execution_result: Optional[ExecutionResult] = None
+        execution_result: ExecutionResult | None = None
 
         for round_num in range(self.config.experiment.max_rounds):
             logger.info("  Round %d/%d", round_num + 1, self.config.experiment.max_rounds)
@@ -334,7 +334,7 @@ class TrialRunner:
         logger.warning("  Could not find agent with role %s for fault injection", target_role)
 
     @staticmethod
-    def _run_sandbox(outputs: list[AgentOutput]) -> Optional[ExecutionResult]:
+    def _run_sandbox(outputs: list[AgentOutput]) -> ExecutionResult | None:
         """Run the code sandbox on a round's outputs.
 
         Finds the Coder and Tester outputs and evaluates the code.
